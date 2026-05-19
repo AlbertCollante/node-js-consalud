@@ -215,6 +215,87 @@ app.get('/cierres', async (req, res) => {
 
 // Inventario
 
+// API para agregar un nuevo producto al inventario
+app.post('/agregar-producto', async (req, res) => {
+    const {
+        marca,
+        nombre,
+        categoria,
+        stock_actual,
+        stock_minimo,
+        vencimiento,
+        precio_caja,
+        precio_compra,
+        precio_unitario,
+        estante
+    } = req.body;
+
+    // Validación de datos requeridos
+    if (
+        !marca ||
+        !nombre ||
+        !categoria ||
+        stock_actual === undefined ||
+        stock_minimo === undefined ||
+        !vencimiento ||
+        precio_caja === undefined ||
+        precio_compra === undefined ||
+        precio_unitario === undefined ||
+        !estante
+    ) {
+        return res.status(400).json({
+            error: 'Todos los campos son requeridos: marca, nombre, categoria, stock_actual, stock_minimo, vencimiento, precio_caja, precio_compra, precio_unitario, estante'
+        });
+    }
+
+    try {
+        // Calcular ganancia: precio_unitario * stock_actual
+        const ganancia = precio_unitario * stock_actual;
+
+        const [result] = await pool.query(`
+            INSERT INTO inventario_productos (
+                marca,
+                nombre,
+                categoria,
+                stock_actual,
+                stock_minimo,
+                vencimiento,
+                precio_caja,
+                precio_compra,
+                precio_unitario,
+                estante,
+                ganancia,
+                compra
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            marca,
+            nombre,
+            categoria,
+            stock_actual,
+            stock_minimo,
+            vencimiento,
+            precio_caja,
+            precio_compra,
+            precio_unitario,
+            estante,
+            ganancia,
+            precio_compra
+        ]);
+
+        res.status(201).json({
+            mensaje: 'Producto agregado correctamente',
+            idproducto: result.insertId
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            error: 'Error al agregar el producto',
+            details: error.message
+        });
+    }
+});
+
 // API para listar todos los productos del inventario
 app.get('/inventario-productos', async (req, res) => {
     try {
@@ -232,6 +313,7 @@ app.get('/inventario-productos', async (req, res) => {
         });
     }
 });
+
 
 
 // Ventas
