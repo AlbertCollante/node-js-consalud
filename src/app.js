@@ -69,12 +69,12 @@ app.get('/users', async (req, res) => {
 });
 
 // API para abrir turno: Crea un nuevo registro de apertura de turno con monto inicial y observaciones
-// Parámetros: usuario, montoInicial, observaciones
+// Parámetros: usuario, montoInicial, observaciones (opcional)
 app.post('/apertura-turno', async (req, res) => {
     const { usuario, montoInicial, observaciones } = req.body;
 
-    if (!usuario || montoInicial === undefined || !observaciones) {
-        return res.status(400).json({ error: 'usuario, montoInicial y observaciones son requeridos' });
+    if (!usuario || montoInicial === undefined) {
+        return res.status(400).json({ error: 'usuario y montoInicial son requeridos' });
     }
 
     try {
