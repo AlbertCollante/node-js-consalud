@@ -16,7 +16,7 @@ app.get('/', (req, res) => {
 // API de prueba de conexión: Verifica que la base de datos está conectada
 app.get('/ping', async (req, res) => {
     const [result] = await pool.query(`SELECT "Hello word" as RESULT`);
-    console.log(result);
+    //console.log(result);
     res.json(result[0]);
 });
 
@@ -64,7 +64,7 @@ app.post('/user', async (req, res) => {
 // API para listar usuarios: Retorna todos los usuarios registrados en el sistema
 app.get('/users', async (req, res) => {
     const [result] = await pool.query(`SELECT * FROM usuarios`);
-    console.log(result);
+    //console.log(result);
     res.json(result);
 });
 
@@ -99,7 +99,7 @@ app.post('/apertura-turno', async (req, res) => {
 // API para listar aperturas de turno: Retorna todos los registros de aperturas de turno
 app.get('/aperturas', async (req, res) => {
     const [result] = await pool.query(`SELECT * FROM aperturas_turno`);
-    console.log(result);
+    //console.log(result);
     res.json(result);
 });
 
@@ -156,7 +156,7 @@ app.post('/cierre-turno', async (req, res) => {
         tarjeta === undefined ||
         transferencia === undefined ||
         total === undefined ||
-        !observaciones
+        observaciones === undefined
     ) {
         return res.status(400).json({
             error: 'Todos los campos son requeridos'
@@ -665,6 +665,6 @@ app.post('/registrar-detalle-venta', async (req, res) => {
 
 
 app.listen(PORT)
-console.log('Server is running on port 9000');
+//console.log('Server is running on port 9000');
 
 
