@@ -146,7 +146,7 @@ app.put('/cerrar-turno', async (req, res) => {
 
 // API para registrar cierre de turno
 app.post('/cierre-turno', async (req, res) => {
-    const {usuario,efectivo,yape,tarjeta,transferencia,total,observaciones} = req.body;
+    const {usuario,efectivo,yape,tarjeta,transferencia,total,observaciones,aperturaId} = req.body;
 
     // Validación básica
     if (
@@ -156,7 +156,8 @@ app.post('/cierre-turno', async (req, res) => {
         tarjeta === undefined ||
         transferencia === undefined ||
         total === undefined ||
-        observaciones === undefined
+        observaciones === undefined ||
+        !aperturaId
     ) {
         return res.status(400).json({
             error: 'Todos los campos son requeridos'
@@ -166,11 +167,11 @@ app.post('/cierre-turno', async (req, res) => {
     try {
         const [result] = await pool.query(
             `INSERT INTO cierre_turno
-            (fecha_hora, usuario, efectivo, yape, tarjeta,transferencia, total,observaciones)
+            (fecha_hora, usuario, efectivo, yape, tarjeta,transferencia, total,observaciones,id_apertura)
             VALUES
-            (NOW(),?, ?, ?, ?, ?, ?, ?)`,
+            (NOW(),?, ?, ?, ?, ?, ?, ?,?)`,
             [
-                usuario,efectivo,yape,tarjeta,transferencia,total,observaciones
+                usuario,efectivo,yape,tarjeta,transferencia,total,observaciones,aperturaId
             ]
         );
 
@@ -183,7 +184,8 @@ app.post('/cierre-turno', async (req, res) => {
             tarjeta,
             transferencia,
             total,
-            observaciones       
+            observaciones,
+            aperturaId       
         });
 
     } catch (error) {
@@ -301,7 +303,7 @@ app.get('/inventario-productos', async (req, res) => {
     try {
 
         const [result] = await pool.query(
-            'SELECT * FROM inventario_productos'
+            'SELECT * FROM inventario_productos ORDER BY nombre ASC'
         );
 
         res.json(result);
@@ -334,7 +336,8 @@ app.get('/ventas', async (req, res) => {
                 pago,
                 vuelto,
                 metodo,
-                usuario
+                usuario,
+                id_apertura
             FROM ventas
             ORDER BY fecha DESC
         `);
@@ -496,7 +499,8 @@ app.post('/registrar-venta', async (req, res) => {
         pago,
         vuelto,
         metodo,
-        usuario
+        usuario,
+        id_apertura
     } = req.body;
 
     // Validación
@@ -507,7 +511,8 @@ app.post('/registrar-venta', async (req, res) => {
         pago === undefined ||
         vuelto === undefined ||
         !metodo ||
-        !usuario
+        !usuario ||
+        !id_apertura
     ) {
         return res.status(400).json({
             error: 'Faltan datos requeridos'
@@ -528,11 +533,13 @@ app.post('/registrar-venta', async (req, res) => {
                 pago,
                 vuelto,
                 metodo,
-                usuario
+                usuario,
+                id_apertura
             )
             VALUES (
                 NOW(),
                 CURDATE(),
+                ?,
                 ?,
                 ?,
                 ?,
@@ -552,11 +559,13 @@ app.post('/registrar-venta', async (req, res) => {
             pago,
             vuelto,
             metodo,
-            usuario
+            usuario,
+            id_apertura
         ]);
         res.status(201).json({
             mensaje: 'Venta registrada correctamente',
-            idventa: result.insertId
+            idventa: result.insertId,
+            id_apertura: id_apertura
         });
 
     } catch (error) {
