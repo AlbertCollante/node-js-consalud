@@ -673,6 +673,390 @@ app.post('/registrar-detalle-venta', async (req, res) => {
 });
 
 
+// 1. Agregar servicio a lista_servicios
+
+app.post('/agregar-servicio', async (req, res) => {
+
+    const {
+        descripcion,
+        precio,
+        duracion
+    } = req.body;
+
+    if (!descripcion) {
+        return res.status(400).json({
+            error: 'descripcion es requerida'
+        });
+    }
+
+    try {
+
+        const [result] = await pool.query(`
+            INSERT INTO lista_servicios (
+                descripcion,
+                precio,
+                duracion
+            )
+            VALUES (?, ?, ?)
+        `, [
+            descripcion,
+            precio,
+            duracion
+        ]);
+
+        res.status(201).json({
+            mensaje: 'Servicio agregado correctamente',
+            idservicio: result.insertId
+        });
+
+    } catch (error) {
+
+        res.status(500).json({
+            error: 'Error al agregar servicio',
+            details: error.message
+        });
+
+    }
+
+});
+
+
+//2. Obtener lista de servicios
+
+app.get('/lista-servicios', async (req, res) => {
+
+    try {
+
+        const [result] = await pool.query(`
+            SELECT *
+            FROM lista_servicios
+            ORDER BY descripcion
+        `);
+
+        res.json(result);
+
+    } catch (error) {
+
+        res.status(500).json({
+            error: 'Error al obtener servicios',
+            details: error.message
+        });
+
+    }
+
+});
+
+
+//3. Editar servicio
+
+app.put('/editar-servicio/:id', async (req, res) => {
+
+    const { id } = req.params;
+
+    const {
+        descripcion,
+        precio,
+        duracion
+    } = req.body;
+
+    if (!descripcion) {
+        return res.status(400).json({
+            error: 'descripcion requerida'
+        });
+    }
+
+    try {
+
+        const [result] = await pool.query(`
+            UPDATE lista_servicios
+            SET
+                descripcion = ?,
+                precio = ?,
+                duracion = ?
+            WHERE idservicio = ?
+        `, [
+            descripcion,
+            precio,
+            duracion,
+            id
+        ]);
+
+        if (result.affectedRows === 0) {
+
+            return res.status(404).json({
+                error: 'Servicio no encontrado'
+            });
+
+        }
+
+        res.json({
+            mensaje: 'Servicio actualizado correctamente'
+        });
+
+    } catch (error) {
+
+        res.status(500).json({
+            error: 'Error al actualizar servicio',
+            details: error.message
+        });
+
+    }
+
+});
+
+
+// 4. Registrar servicio dado
+
+
+app.post('/registrar-servicio', async (req, res) => {
+
+    const {
+        idservicio,
+        subtotal,
+        vendedor,
+        pago,
+        vuelto,
+        metodo,
+        usuario,
+        idapertura
+    } = req.body;
+
+    if (
+        !idservicio ||
+        subtotal === undefined ||
+        !vendedor ||
+        pago === undefined ||
+        vuelto === undefined ||
+        !metodo ||
+        !usuario ||
+        !idapertura
+    ) {
+        return res.status(400).json({
+            error: 'Faltan datos requeridos'
+        });
+    }
+
+    try {
+
+        const [result] = await pool.query(`
+            INSERT INTO servicio (
+                idservicio,
+                subtotal,
+                vendedor,
+                hora,
+                pago,
+                vuelto,
+                metodo,
+                usuario,
+                idapertura
+            )
+            VALUES (
+                ?,
+                ?,
+                ?,
+                NOW(),
+                ?,
+                ?,
+                ?,
+                ?,
+                ?
+            )
+        `, [
+            idservicio,
+            subtotal,
+            vendedor,
+            pago,
+            vuelto,
+            metodo,
+            usuario,
+            idapertura
+        ]);
+
+        res.status(201).json({
+            mensaje: 'Servicio registrado correctamente',
+            idserviciodado: result.insertId
+        });
+
+    } catch (error) {
+
+        res.status(500).json({
+            error: 'Error al registrar servicio',
+            details: error.message
+        });
+
+    }
+
+});
+
+
+// 5. Registrar detalle servicio
+
+app.post('/registrar-detalle-servicio', async (req, res) => {
+
+    const {
+        idserviciodado,
+        detalle
+    } = req.body;
+
+    if (
+        !idserviciodado ||
+        !Array.isArray(detalle) ||
+        detalle.length === 0
+    ) {
+        return res.status(400).json({
+            error: 'Datos inválidos'
+        });
+    }
+
+    const connection = await pool.getConnection();
+
+    try {
+
+        await connection.beginTransaction();
+
+        for (const item of detalle) {
+
+            await connection.query(`
+                INSERT INTO detalleservicio (
+                    idserviciodado,
+                    idproducto,
+                    nombre,
+                    precio,
+                    cantidad
+                )
+                VALUES (?, ?, ?, ?, ?)
+            `, [
+                idserviciodado,
+                item.idproducto,
+                item.nombre,
+                item.precio,
+                item.cantidad
+            ]);
+
+        }
+
+        await connection.commit();
+
+        res.status(201).json({
+            mensaje: 'Detalle registrado correctamente'
+        });
+
+    } catch (error) {
+
+        await connection.rollback();
+
+        res.status(500).json({
+            error: 'Error al registrar detalle',
+            details: error.message
+        });
+
+    } finally {
+
+        connection.release();
+
+    }
+
+});
+
+
+
+//6. Listar todos los servicios dados
+
+app.get('/servicios', async (req, res) => {
+
+    try {
+
+        const [result] = await pool.query(`
+            SELECT
+                s.idserviciodado,
+                s.idservicio,
+                ls.descripcion,
+                ls.duracion,
+                s.subtotal,
+                s.vendedor,
+                s.hora,
+                s.pago,
+                s.vuelto,
+                s.metodo,
+                s.usuario,
+                s.idapertura
+            FROM servicio s
+            INNER JOIN lista_servicios ls
+                ON ls.idservicio = s.idservicio
+            ORDER BY s.hora DESC
+        `);
+
+        res.json(result);
+
+    } catch (error) {
+
+        res.status(500).json({
+            error: 'Error al obtener servicios',
+            details: error.message
+        });
+
+    }
+
+});
+
+
+// 7. Obtener detalle completo de un servicio dado
+
+app.post('/detalle-servicio', async (req, res) => {
+
+    const { idserviciodado } = req.body;
+
+    if (!idserviciodado) {
+        return res.status(400).json({
+            error: 'idserviciodado requerido'
+        });
+    }
+
+    try {
+
+        const [servicio] = await pool.query(`
+            SELECT
+                s.*,
+                ls.descripcion,
+                ls.duracion
+            FROM servicio s
+            INNER JOIN lista_servicios ls
+                ON ls.idservicio = s.idservicio
+            WHERE s.idserviciodado = ?
+        `, [idserviciodado]);
+
+        if (servicio.length === 0) {
+
+            return res.status(404).json({
+                error: 'Servicio no encontrado'
+            });
+
+        }
+
+        const [detalle] = await pool.query(`
+            SELECT *
+            FROM detalleservicio
+            WHERE idserviciodado = ?
+        `, [idserviciodado]);
+
+        res.json({
+            servicio: servicio[0],
+            detalle
+        });
+
+    } catch (error) {
+
+        res.status(500).json({
+            error: 'Error al obtener detalle',
+            details: error.message
+        });
+
+    }
+
+});
+
+
+
 app.listen(PORT)
 //console.log('Server is running on port 9000');
 
