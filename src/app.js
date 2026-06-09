@@ -679,8 +679,10 @@ app.post('/agregar-servicio', async (req, res) => {
 
     const {
         descripcion,
-        precio,
-        duracion
+        precio_de_aplicacion,
+        duracion,
+        productos,
+        total
     } = req.body;
 
     if (!descripcion) {
@@ -694,14 +696,18 @@ app.post('/agregar-servicio', async (req, res) => {
         const [result] = await pool.query(`
             INSERT INTO lista_servicios (
                 descripcion,
-                precio,
-                duracion
+                precio_de_aplicacion,
+                duracion,
+                productos,
+                precio
             )
-            VALUES (?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
         `, [
             descripcion,
-            precio,
-            duracion
+            precio_de_aplicacion || 0,
+            duracion || "",
+            productos ? JSON.stringify(productos) : null,
+            total || 0
         ]);
 
         res.status(201).json({
