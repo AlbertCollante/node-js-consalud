@@ -482,7 +482,37 @@ app.post('/actualizar-stock-venta', async (req, res) => {
 
 });
 
+app.put('/actualizar-producto', async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const { id, nombre, marca, categoria, estante, stock_actual, stock_minimo,
+            precio_compra, precio_unitario, precio_blister, precio_caja,
+            unidades_blister, blisters_caja, vencimiento, ubicacion } = req.body;
 
+    if (!id) return res.status(400).json({ error: 'ID de producto requerido' });
+
+    const query = `
+      UPDATE inventario_productos SET
+        nombre = ?, marca = ?, categoria = ?, estante = ?,
+        stock_actual = ?, stock_minimo = ?, precio_compra = ?,
+        precio_unitario = ?, precio_blister = ?, precio_caja = ?,
+        unidades_blister = ?, blisters_caja = ?, vencimiento = ?,
+        ubicacion = ?
+      WHERE id = ?
+    `;
+    const values = [nombre, marca, categoria, estante, stock_actual, stock_minimo,
+                    precio_compra, precio_unitario, precio_blister, precio_caja,
+                    unidades_blister, blisters_caja, vencimiento, ubicacion, id];
+
+    await connection.query(query, values);
+    res.json({ success: true, message: 'Producto actualizado correctamente' });
+  } catch (err) {
+    console.error('Error actualizando producto:', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    connection.release();
+  }
+});
 
 // ======================================================
 // API 1: REGISTRAR VENTA
