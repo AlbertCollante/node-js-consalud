@@ -783,7 +783,7 @@ app.get('/lista-servicios', async (req, res) => {
 });
 
 
-//3. Editar servicio
+// 3. Editar servicio
 
 app.put('/editar-servicio/:id', async (req, res) => {
 
@@ -792,7 +792,10 @@ app.put('/editar-servicio/:id', async (req, res) => {
     const {
         descripcion,
         precio,
-        duracion
+        duracion,
+        productos,
+        precio_de_aplicacion,
+        estado
     } = req.body;
 
     if (!descripcion) {
@@ -808,21 +811,25 @@ app.put('/editar-servicio/:id', async (req, res) => {
             SET
                 descripcion = ?,
                 precio = ?,
-                duracion = ?
+                duracion = ?,
+                productos = ?,
+                precio_de_aplicacion = ?,
+                estado = ?
             WHERE idservicio = ?
         `, [
             descripcion,
             precio,
             duracion,
+            productos ? JSON.stringify(productos) : null,
+            precio_de_aplicacion,
+            estado,
             id
         ]);
 
         if (result.affectedRows === 0) {
-
             return res.status(404).json({
                 error: 'Servicio no encontrado'
             });
-
         }
 
         res.json({
@@ -925,6 +932,7 @@ app.post('/registrar-servicio', async (req, res) => {
 });
 
 
+
 // 5. Registrar detalle servicio
 
 app.post('/registrar-detalle-servicio', async (req, res) => {
@@ -992,7 +1000,7 @@ app.post('/registrar-detalle-servicio', async (req, res) => {
 
     }
 
-});
+}); 
 
 
 
