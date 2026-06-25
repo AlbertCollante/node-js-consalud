@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import { pool } from './db.js';
 import { PORT } from './config.js';
+import proveedoresRoutes from './routes/proveedores.routes.js';
+import pedidosRoutes from './routes/pedidos.routes.js';
 
 const app = express();
 
@@ -1100,6 +1102,12 @@ app.post('/detalle-servicio', async (req, res) => {
 });
 
 
+
+// ======================================================
+// Módulos de proveedores y pedidos
+// ======================================================
+app.use('/api/proveedores', proveedoresRoutes);
+app.use('/api/pedidos', pedidosRoutes);
 
 app.listen(PORT)
 //console.log('Server is running on port 9000');
