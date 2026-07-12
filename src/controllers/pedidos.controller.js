@@ -245,12 +245,14 @@ export async function actualizarPedido(req, res) {
             return errorResponse(res, 404, 'Pedido no encontrado');
         }
 
-        // Regla de negocio 2: no se permite editar si alguna línea ya fue entregada
+        // Regla de negocio 2: no se permite editar si alguna línea ya fue entregada o rechazada
         const detallesActuales = await obtenerDetallesPedido(id, connection);
-        const tieneEntregado = detallesActuales.some(d => d.estado === 'ENTREGADO');
-        if (tieneEntregado) {
+        const tieneLineaFinalizada = detallesActuales.some(
+            d => d.estado === 'ENTREGADO' || d.estado === 'RECHAZADO'
+        );
+        if (tieneLineaFinalizada) {
             await connection.rollback();
-            return errorResponse(res, 409, 'No se puede editar el pedido porque tiene líneas ya recepcionadas');
+            return errorResponse(res, 409, 'No se puede editar el pedido porque tiene líneas ya recepcionadas o rechazadas');
         }
 
         const nuevoIdProveedor = id_proveedor !== undefined ? id_proveedor : pedidoActual.id_proveedor;
@@ -326,13 +328,21 @@ export async function eliminarPedido(req, res) {
 // PATCH /api/pedidos/:idPedido/detalle/:idDetalle/recepcionar
 export async function recepcionarDetalle(req, res) {
     const { idPedido, idDetalle } = req.params;
-    const { cantidad_recibida, cantidad_bonificada_recibida, observaciones } = req.body;
+    const { estado, cantidad_recibida, cantidad_bonificada_recibida, observaciones } = req.body;
 
-    if (cantidad_recibida === undefined || isNaN(Number(cantidad_recibida)) || Number(cantidad_recibida) < 0) {
-        return errorResponse(res, 400, 'El campo cantidad_recibida es requerido y debe ser numérico mayor o igual a 0');
+    const estadoFinal = estado || 'ENTREGADO';
+
+    if (!['ENTREGADO', 'RECHAZADO'].includes(estadoFinal)) {
+        return errorResponse(res, 400, "El campo estado debe ser 'ENTREGADO' o 'RECHAZADO'");
     }
-    if (cantidad_bonificada_recibida === undefined || isNaN(Number(cantidad_bonificada_recibida)) || Number(cantidad_bonificada_recibida) < 0) {
-        return errorResponse(res, 400, 'El campo cantidad_bonificada_recibida es requerido y debe ser numérico mayor o igual a 0');
+
+    if (estadoFinal === 'ENTREGADO') {
+        if (cantidad_recibida === undefined || isNaN(Number(cantidad_recibida)) || Number(cantidad_recibida) < 0) {
+            return errorResponse(res, 400, 'El campo cantidad_recibida es requerido y debe ser numérico mayor o igual a 0');
+        }
+        if (cantidad_bonificada_recibida === undefined || isNaN(Number(cantidad_bonificada_recibida)) || Number(cantidad_bonificada_recibida) < 0) {
+            return errorResponse(res, 400, 'El campo cantidad_bonificada_recibida es requerido y debe ser numérico mayor o igual a 0');
+        }
     }
 
     const connection = await pool.getConnection();
@@ -355,12 +365,21 @@ export async function recepcionarDetalle(req, res) {
             return errorResponse(res, 404, 'Línea de detalle no encontrada para este pedido');
         }
 
+        const detalleActual = detalleRows[0];
+        if (detalleActual.estado !== 'PENDIENTE') {
+            await connection.rollback();
+            return errorResponse(res, 409, `No se puede modificar una línea que ya fue ${detalleActual.estado.toLowerCase()}`);
+        }
+
+        const cantidadRecibidaFinal = estadoFinal === 'RECHAZADO' ? 0 : Number(cantidad_recibida);
+        const cantidadBonificadaFinal = estadoFinal === 'RECHAZADO' ? 0 : Number(cantidad_bonificada_recibida);
+
         await connection.query(
             `UPDATE pedido_detalle
              SET cantidad_recibida = ?, cantidad_bonificada_recibida = ?,
-                 observaciones = ?, estado = 'ENTREGADO', fecha_recepcion = NOW()
+                 observaciones = ?, estado = ?, fecha_recepcion = NOW()
              WHERE id_pedido_detalle = ?`,
-            [cantidad_recibida, cantidad_bonificada_recibida, observaciones || null, idDetalle]
+            [cantidadRecibidaFinal, cantidadBonificadaFinal, observaciones || null, estadoFinal, idDetalle]
         );
 
         const [updatedRows] = await connection.query(
@@ -374,6 +393,130 @@ export async function recepcionarDetalle(req, res) {
     } catch (error) {
         await connection.rollback();
         return errorResponse(res, 500, 'Error al recepcionar detalle', error.message);
+    } finally {
+        connection.release();
+    }
+}
+
+// PATCH /api/pedidos/:idPedido/detalle/:idDetalle/rechazar
+export async function rechazarDetalle(req, res) {
+    const { idPedido, idDetalle } = req.params;
+    const { observaciones } = req.body;
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const pedido = await existePedido(idPedido, connection);
+        if (!pedido) {
+            await connection.rollback();
+            return errorResponse(res, 404, 'Pedido no encontrado');
+        }
+
+        const [detalleRows] = await connection.query(
+            'SELECT * FROM pedido_detalle WHERE id_pedido_detalle = ? AND id_pedido = ?',
+            [idDetalle, idPedido]
+        );
+
+        if (detalleRows.length === 0) {
+            await connection.rollback();
+            return errorResponse(res, 404, 'Línea de detalle no encontrada para este pedido');
+        }
+
+        const detalleActual = detalleRows[0];
+        if (detalleActual.estado === 'ENTREGADO') {
+            await connection.rollback();
+            return errorResponse(res, 409, 'No se puede rechazar una línea que ya fue entregada');
+        }
+        if (detalleActual.estado === 'RECHAZADO') {
+            await connection.rollback();
+            return errorResponse(res, 409, 'La línea ya fue rechazada');
+        }
+
+        await connection.query(
+            `UPDATE pedido_detalle
+             SET estado = 'RECHAZADO',
+                 cantidad_recibida = 0,
+                 cantidad_bonificada_recibida = 0,
+                 fecha_recepcion = NOW(),
+                 observaciones = ?
+             WHERE id_pedido_detalle = ?`,
+            [observaciones || null, idDetalle]
+        );
+
+        const [updatedRows] = await connection.query(
+            'SELECT * FROM pedido_detalle WHERE id_pedido_detalle = ?',
+            [idDetalle]
+        );
+
+        await connection.commit();
+
+        res.json(formatRecepcionDetalle(updatedRows[0]));
+    } catch (error) {
+        await connection.rollback();
+        return errorResponse(res, 500, 'Error al rechazar detalle', error.message);
+    } finally {
+        connection.release();
+    }
+}
+
+// PATCH /api/pedidos/:idPedido/rechazar
+export async function rechazarPedido(req, res) {
+    const { idPedido } = req.params;
+    const { observaciones } = req.body;
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const pedido = await existePedido(idPedido, connection);
+        if (!pedido) {
+            await connection.rollback();
+            return errorResponse(res, 404, 'Pedido no encontrado');
+        }
+
+        const [detallesRows] = await connection.query(
+            'SELECT * FROM pedido_detalle WHERE id_pedido = ?',
+            [idPedido]
+        );
+
+        if (detallesRows.length === 0) {
+            await connection.rollback();
+            return errorResponse(res, 404, 'El pedido no tiene líneas de detalle');
+        }
+
+        const tieneEntregado = detallesRows.some(d => d.estado === 'ENTREGADO');
+        if (tieneEntregado) {
+            await connection.rollback();
+            return errorResponse(res, 409, 'No se puede rechazar el pedido porque tiene líneas ya entregadas');
+        }
+
+        const observacionFinal = observaciones || null;
+
+        for (const detalle of detallesRows) {
+            if (detalle.estado === 'PENDIENTE') {
+                await connection.query(
+                    `UPDATE pedido_detalle
+                     SET estado = 'RECHAZADO',
+                         cantidad_recibida = 0,
+                         cantidad_bonificada_recibida = 0,
+                         fecha_recepcion = NOW(),
+                         observaciones = ?
+                     WHERE id_pedido_detalle = ?`,
+                    [observacionFinal, detalle.id_pedido_detalle]
+                );
+            }
+        }
+
+        const detallesActualizados = await obtenerDetallesPedido(idPedido, connection);
+        const pedidoRow = await existePedido(idPedido, connection);
+
+        await connection.commit();
+
+        res.json(formatPedidoCompleto(pedidoRow, detallesActualizados));
+    } catch (error) {
+        await connection.rollback();
+        return errorResponse(res, 500, 'Error al rechazar pedido', error.message);
     } finally {
         connection.release();
     }
@@ -398,10 +541,10 @@ export async function listarDiscrepancias(req, res) {
             FROM pedido_detalle pd
             JOIN pedidos p ON p.id_pedido = pd.id_pedido
             JOIN proveedores pr ON pr.id_proveedor = p.id_proveedor
-            WHERE pd.estado = 'ENTREGADO'
+            WHERE pd.estado IN ('ENTREGADO', 'RECHAZADO')
               AND (
-                  pd.cantidad_recibida < pd.cantidad_pedida
-                  OR pd.cantidad_bonificada_recibida < pd.cantidad_bonificada
+                  COALESCE(pd.cantidad_recibida, 0) < pd.cantidad_pedida
+                  OR COALESCE(pd.cantidad_bonificada_recibida, 0) < pd.cantidad_bonificada
               )
         `;
         const params = [];

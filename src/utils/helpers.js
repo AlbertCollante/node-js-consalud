@@ -43,10 +43,22 @@ export function calcularDiscrepancia(detalle) {
 
 /**
  * Calcula el estado general de un pedido a partir de sus detalles.
+ * Estados posibles: PENDIENTE, PARCIAL, COMPLETO, RECHAZADO.
  */
 export function calcularEstadoGeneral(detalles) {
     if (!detalles || detalles.length === 0) return 'PENDIENTE';
-    return detalles.every(d => d.estado === 'ENTREGADO') ? 'COMPLETO' : 'PENDIENTE';
+
+    const estados = detalles.map(d => d.estado);
+
+    const todosEntregado = estados.every(e => e === 'ENTREGADO');
+    const todosRechazado = estados.every(e => e === 'RECHAZADO');
+    const todosPendiente = estados.every(e => e === 'PENDIENTE');
+
+    if (todosEntregado) return 'COMPLETO';
+    if (todosRechazado) return 'RECHAZADO';
+    if (todosPendiente) return 'PENDIENTE';
+
+    return 'PARCIAL';
 }
 
 /**

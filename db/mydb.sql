@@ -2944,7 +2944,7 @@ CREATE TABLE `pedido_detalle` (
   `descripcion_promocion` varchar(200) DEFAULT NULL,
   `cantidad_recibida` decimal(10,2) DEFAULT NULL,
   `cantidad_bonificada_recibida` decimal(10,2) DEFAULT NULL,
-  `estado` enum('PENDIENTE','ENTREGADO') NOT NULL DEFAULT 'PENDIENTE',
+  `estado` enum('PENDIENTE','ENTREGADO','RECHAZADO') NOT NULL DEFAULT 'PENDIENTE',
   `fecha_recepcion` datetime DEFAULT NULL,
   `observaciones` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
