@@ -229,7 +229,7 @@ app.post('/agregar-producto', async (req, res) => {
         stock_minimo,
         vencimiento,
         precio_caja,
-        precio_compra,
+        costo_compra,
         precio_unitario,
         estante
     } = req.body;
@@ -243,12 +243,12 @@ app.post('/agregar-producto', async (req, res) => {
         stock_minimo === undefined ||
         !vencimiento ||
         precio_caja === undefined ||
-        precio_compra === undefined ||
+        costo_compra === undefined ||
         precio_unitario === undefined ||
         !estante
     ) {
         return res.status(400).json({
-            error: 'Todos los campos son requeridos: marca, nombre, categoria, stock_actual, stock_minimo, vencimiento, precio_caja, precio_compra, precio_unitario, estante'
+            error: 'Todos los campos son requeridos: marca, nombre, categoria, stock_actual, stock_minimo, vencimiento, precio_caja, costo_compra, precio_unitario, estante'
         });
     }
 
@@ -265,7 +265,7 @@ app.post('/agregar-producto', async (req, res) => {
                 stock_minimo,
                 vencimiento,
                 precio_caja,
-                precio_compra,
+                costo_compra,
                 precio_unitario,
                 estante,
                 ganancia,
@@ -280,11 +280,11 @@ app.post('/agregar-producto', async (req, res) => {
             stock_minimo,
             vencimiento,
             precio_caja,
-            precio_compra,
+            costo_compra,
             precio_unitario,
             estante,
             ganancia,
-            precio_compra
+            costo_compra
         ]);
 
         res.status(201).json({
@@ -324,9 +324,10 @@ app.get('/inventario-productos', async (req, res) => {
 
 app.get('/ventas', async (req, res) => {
     try {
+        const { incluirAnuladas } = req.query;
 
-        const [result] = await pool.query(`
-            SELECT 
+        let sql = `
+            SELECT
                 id,
                 fecha,
                 dateOnly,
@@ -339,10 +340,18 @@ app.get('/ventas', async (req, res) => {
                 vuelto,
                 metodo,
                 usuario,
-                id_apertura
+                id_apertura,
+                estado
             FROM ventas
-            ORDER BY fecha DESC
-        `);
+        `;
+
+        if (incluirAnuladas !== '1' && incluirAnuladas !== 'true') {
+            sql += ` WHERE estado = 'activa' `;
+        }
+
+        sql += ` ORDER BY fecha DESC `;
+
+        const [result] = await pool.query(sql);
         res.json(result);
     } catch (error) {
         res.status(500).json({
@@ -365,24 +374,25 @@ app.post('/detalle-venta', async (req, res) => {
     }
 
     try {
-        // Verificar si existe la venta
+        // Verificar si existe la venta y que este activa
         const [venta] = await pool.query(
-            'SELECT * FROM ventas WHERE id = ?',
+            "SELECT * FROM ventas WHERE id = ? AND estado = 'activa'",
             [idventa]
         );
         if (venta.length === 0) {
             return res.status(404).json({
-                error: 'La venta no existe'
+                error: 'La venta no existe o fue anulada'
             });
         }
         // Obtener detalle de la venta
         const [detalle] = await pool.query(`
-            SELECT 
+            SELECT
                 dv.id,
                 dv.idventa,
                 dv.idproducto,
                 dv.nombre,
                 dv.precio,
+                dv.costo_compra,
                 dv.cantidad,
                 dv.subtotal
             FROM detalle_venta dv
@@ -396,6 +406,232 @@ app.post('/detalle-venta', async (req, res) => {
     } catch (error) {
         res.status(500).json({
             error: 'Error al obtener el detalle de venta',
+            details: error.message
+        });
+    }
+});
+
+
+// ======================================================
+// API: ANULAR VENTA (EXTORNO)
+// ======================================================
+// Reversa una venta: marca la venta como anulada, registra
+// la anulacion y devuelve los productos al inventario.
+//
+// Body esperado:
+// {
+//   "idventa": 123,
+//   "motivo": "Cliente cancelo el pedido",
+//   "usuario": "Administrador 01"
+// }
+//
+// Respuesta exitosa:
+// {
+//   "mensaje": "Venta anulada correctamente",
+//   "id_anulacion": 5,
+//   "idventa": 123,
+//   "totalExtornado": 45.50,
+//   "metodo": "Efectivo",
+//   "productosDevueltos": [...]
+// }
+// ======================================================
+
+app.post('/anular-venta', async (req, res) => {
+    const { idventa, motivo, usuario } = req.body;
+
+    // Validacion basica
+    if (!idventa) {
+        return res.status(400).json({ error: 'El idventa es requerido' });
+    }
+    if (!usuario) {
+        return res.status(400).json({ error: 'El usuario que anula es requerido' });
+    }
+
+    const connection = await pool.getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        // 1. Verificar que la venta exista y no este ya anulada
+        const [ventaRows] = await connection.query(
+            'SELECT id, total, metodo, estado FROM ventas WHERE id = ? FOR UPDATE',
+            [idventa]
+        );
+
+        if (ventaRows.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'La venta no existe' });
+        }
+
+        const venta = ventaRows[0];
+
+        if (venta.estado === 'anulada') {
+            await connection.rollback();
+            return res.status(400).json({ error: 'La venta ya fue anulada anteriormente' });
+        }
+
+        // 2. Obtener el detalle de productos vendidos
+        const [detalle] = await connection.query(
+            'SELECT idproducto, nombre, precio, costo_compra, cantidad FROM detalle_venta WHERE idventa = ?',
+            [idventa]
+        );
+
+        if (detalle.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'La venta no tiene productos asociados' });
+        }
+
+        // 3. Devolver stock producto por producto
+        const productosDevueltos = [];
+        for (const item of detalle) {
+            // Verificar que el producto exista
+            const [productoRows] = await connection.query(
+                'SELECT id, nombre, stock_actual FROM inventario_productos WHERE id = ? FOR UPDATE',
+                [item.idproducto]
+            );
+
+            if (productoRows.length === 0) {
+                await connection.rollback();
+                return res.status(404).json({
+                    error: `Producto no encontrado en inventario: ${item.idproducto}`
+                });
+            }
+
+            const producto = productoRows[0];
+
+            // Restaurar stock sumando la cantidad vendida
+            await connection.query(
+                'UPDATE inventario_productos SET stock_actual = stock_actual + ? WHERE id = ?',
+                [item.cantidad, item.idproducto]
+            );
+
+            productosDevueltos.push({
+                idproducto: item.idproducto,
+                nombre: item.nombre,
+                precio: item.precio,
+                costo_compra: item.costo_compra,
+                cantidadDevuelta: item.cantidad,
+                stockAnterior: producto.stock_actual,
+                stockNuevo: producto.stock_actual + item.cantidad
+            });
+        }
+
+        // 4. Marcar la venta como anulada
+        await connection.query(
+            "UPDATE ventas SET estado = 'anulada' WHERE id = ?",
+            [idventa]
+        );
+
+        // 5. Registrar la anulacion
+        const [anulacionResult] = await connection.query(
+            `INSERT INTO ventas_anuladas (idventa, motivo, usuario, fecha_hora, total, metodo)
+             VALUES (?, ?, ?, NOW(), ?, ?)`,
+            [idventa, motivo || null, usuario, venta.total, venta.metodo]
+        );
+
+        await connection.commit();
+
+        res.json({
+            mensaje: 'Venta anulada correctamente',
+            id_anulacion: anulacionResult.insertId,
+            idventa: Number(idventa),
+            totalExtornado: venta.total,
+            metodo: venta.metodo,
+            motivo: motivo || null,
+            usuario,
+            productosDevueltos
+        });
+
+    } catch (error) {
+        await connection.rollback();
+        res.status(500).json({
+            error: 'Error al anular la venta',
+            details: error.message
+        });
+    } finally {
+        connection.release();
+    }
+});
+
+
+// ======================================================
+// API: LISTAR VENTAS ANULADAS (HISTORIAL)
+// ======================================================
+// Retorna el historial de ventas anuladas con datos de la
+// venta original y los productos que fueron devueltos.
+//
+// Query params opcionales:
+//   ?fechaInicio=2026-07-01&fechaFin=2026-07-31
+//   ?usuario=Administrador 01
+// ======================================================
+
+app.get('/ventas-anuladas', async (req, res) => {
+    const { fechaInicio, fechaFin, usuario } = req.query;
+
+    try {
+        let where = 'WHERE 1=1';
+        const params = [];
+
+        if (fechaInicio) {
+            where += ' AND DATE(va.fecha_hora) >= ?';
+            params.push(fechaInicio);
+        }
+        if (fechaFin) {
+            where += ' AND DATE(va.fecha_hora) <= ?';
+            params.push(fechaFin);
+        }
+        if (usuario && usuario.trim() !== '') {
+            where += ' AND va.usuario = ?';
+            params.push(usuario.trim());
+        }
+
+        const [anulaciones] = await pool.query(
+            `SELECT
+                va.id_anulacion,
+                va.idventa,
+                va.motivo,
+                va.usuario AS usuario_anulo,
+                va.fecha_hora,
+                va.total AS total_extornado,
+                va.metodo,
+                v.fecha AS fecha_venta,
+                v.cliente,
+                v.dni,
+                v.usuario AS usuario_vendedor,
+                v.id_apertura
+            FROM ventas_anuladas va
+            INNER JOIN ventas v ON v.id = va.idventa
+            ${where}
+            ORDER BY va.fecha_hora DESC`,
+            params
+        );
+
+        // Obtener los productos devueltos de cada anulacion
+        const resultado = [];
+        for (const anulacion of anulaciones) {
+            const [productos] = await pool.query(
+                `SELECT
+                    dv.idproducto,
+                    dv.nombre,
+                    dv.precio,
+                    dv.costo_compra,
+                    dv.cantidad,
+                    dv.subtotal
+                FROM detalle_venta dv
+                WHERE dv.idventa = ?`,
+                [anulacion.idventa]
+            );
+
+            resultado.push({
+                ...anulacion,
+                productosDevueltos: productos
+            });
+        }
+
+        res.json(resultado);
+    } catch (error) {
+        res.status(500).json({
+            error: 'Error al obtener el historial de ventas anuladas',
             details: error.message
         });
     }
@@ -417,9 +653,23 @@ app.post('/actualizar-stock-venta', async (req, res) => {
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
+
+        // Verificar que la venta exista y este activa
+        const [venta] = await connection.query(
+            "SELECT id FROM ventas WHERE id = ? AND estado = 'activa'",
+            [idventa]
+        );
+
+        if (venta.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({
+                error: 'La venta no existe o fue anulada'
+            });
+        }
+
         // Obtener detalle de productos vendidos
         const [detalle] = await connection.query(`
-            SELECT 
+            SELECT
                 idproducto,
                 cantidad
             FROM detalle_venta
@@ -488,7 +738,7 @@ app.put('/actualizar-producto', async (req, res) => {
   const connection = await pool.getConnection();
   try {
     const { id, nombre, marca, categoria, estante, stock_actual, stock_minimo,
-            precio_compra, precio_unitario, precio_blister, precio_caja,
+            costo_compra, precio_unitario, precio_blister, precio_caja,
             unidades_blister, blisters_caja, vencimiento, ubicacion } = req.body;
 
     if (!id) return res.status(400).json({ error: 'ID de producto requerido' });
@@ -496,14 +746,14 @@ app.put('/actualizar-producto', async (req, res) => {
     const query = `
       UPDATE inventario_productos SET
         nombre = ?, marca = ?, categoria = ?, estante = ?,
-        stock_actual = ?, stock_minimo = ?, precio_compra = ?,
+        stock_actual = ?, stock_minimo = ?, costo_compra = ?,
         precio_unitario = ?, precio_blister = ?, precio_caja = ?,
         unidades_blister = ?, blisters_caja = ?, vencimiento = ?,
         ubicacion = ?
       WHERE id = ?
     `;
     const values = [nombre, marca, categoria, estante, stock_actual, stock_minimo,
-                    precio_compra, precio_unitario, precio_blister, precio_caja,
+                    costo_compra, precio_unitario, precio_blister, precio_caja,
                     unidades_blister, blisters_caja, vencimiento, ubicacion, id];
 
     await connection.query(query, values);
@@ -566,7 +816,8 @@ app.post('/registrar-venta', async (req, res) => {
                 vuelto,
                 metodo,
                 usuario,
-                id_apertura
+                id_apertura,
+                estado
             )
             VALUES (
                 NOW(),
@@ -580,7 +831,8 @@ app.post('/registrar-venta', async (req, res) => {
                 ?,
                 ?,
                 ?,
-                ?
+                ?,
+                'activa'
             )
         `, [
             cliente,
@@ -639,9 +891,9 @@ app.post('/registrar-detalle-venta', async (req, res) => {
 
         await connection.beginTransaction();
 
-        // Verificar venta
+        // Verificar venta activa
         const [venta] = await connection.query(
-            'SELECT id FROM ventas WHERE id = ?',
+            "SELECT id FROM ventas WHERE id = ? AND estado = 'activa'",
             [idventa]
         );
 
@@ -650,7 +902,7 @@ app.post('/registrar-detalle-venta', async (req, res) => {
             await connection.rollback();
 
             return res.status(404).json({
-                error: 'La venta no existe'
+                error: 'La venta no existe o fue anulada'
             });
         }
 
@@ -671,20 +923,32 @@ app.post('/registrar-detalle-venta', async (req, res) => {
                 });
             }
 
+            // Obtener costo de compra si no viene en el item
+            let costoCompra = item.costo_compra;
+            if (costoCompra === undefined || costoCompra === null || costoCompra === '') {
+                const [productoRows] = await connection.query(
+                    'SELECT costo_compra FROM inventario_productos WHERE id = ?',
+                    [item.idproducto]
+                );
+                costoCompra = productoRows.length > 0 ? productoRows[0].costo_compra : null;
+            }
+
             await connection.query(`
                 INSERT INTO detalle_venta (
                     idventa,
                     idproducto,
                     nombre,
                     precio,
+                    costo_compra,
                     cantidad
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
             `, [
                 idventa,
                 item.idproducto,
                 item.nombre,
                 item.precio,
+                costoCompra,
                 item.cantidad
             ]);
 
