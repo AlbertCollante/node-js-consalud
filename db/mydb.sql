@@ -2377,6 +2377,7 @@ CREATE TABLE `inventario_productos` (
   `categoria` varchar(150) DEFAULT NULL,
   `marca` varchar(150) DEFAULT NULL,
   `stock_actual` int(11) DEFAULT 0,
+  `stock_inicial` int(11) DEFAULT 0,
   `stock_minimo` int(11) DEFAULT 0,
   `estado` varchar(50) DEFAULT NULL,
   `precio_caja` decimal(10,2) DEFAULT NULL,
@@ -2910,6 +2911,8 @@ CREATE TABLE `pedidos` (
   `fecha_pedido` datetime NOT NULL,
   `fecha_entrega_estimada` date NOT NULL,
   `total_pedido` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `estado_pago` enum('PENDIENTE','PARCIAL','PAGADO') NOT NULL DEFAULT 'PENDIENTE',
+  `monto_pagado` decimal(10,2) NOT NULL DEFAULT 0.00,
   `observaciones` text DEFAULT NULL,
   `fecha_creacion` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

@@ -106,7 +106,7 @@ function calcularTotalPedido(detalle) {
 
 // POST /api/pedidos
 export async function crearPedido(req, res) {
-    const { id_proveedor, fecha_pedido, fecha_entrega_estimada, observaciones, detalle } = req.body;
+    const { id_proveedor, fecha_pedido, fecha_entrega_estimada, observaciones, detalle, estado_pago, monto_pagado } = req.body;
 
     if (!id_proveedor) {
         return errorResponse(res, 400, 'El campo id_proveedor es requerido');
@@ -116,6 +116,16 @@ export async function crearPedido(req, res) {
     }
     if (!fecha_entrega_estimada) {
         return errorResponse(res, 400, 'El campo fecha_entrega_estimada es requerido');
+    }
+
+    const estadoPagoFinal = estado_pago || 'PENDIENTE';
+    if (!['PENDIENTE', 'PARCIAL', 'PAGADO'].includes(estadoPagoFinal)) {
+        return errorResponse(res, 400, "El campo estado_pago debe ser 'PENDIENTE', 'PARCIAL' o 'PAGADO'");
+    }
+
+    const montoPagadoFinal = Number(monto_pagado ?? 0);
+    if (isNaN(montoPagadoFinal) || montoPagadoFinal < 0) {
+        return errorResponse(res, 400, 'El campo monto_pagado debe ser numérico mayor o igual a 0');
     }
 
     const errorDetalle = validarDetalle(detalle);
@@ -134,11 +144,16 @@ export async function crearPedido(req, res) {
 
         const total_pedido = calcularTotalPedido(detalle);
 
+        if (montoPagadoFinal > total_pedido) {
+            await connection.rollback();
+            return errorResponse(res, 400, 'El monto pagado no puede ser mayor al total del pedido');
+        }
+
         const [result] = await connection.query(
             `INSERT INTO pedidos
-             (id_proveedor, fecha_pedido, fecha_entrega_estimada, total_pedido, observaciones, fecha_creacion)
-             VALUES (?, ?, ?, ?, ?, NOW())`,
-            [id_proveedor, fecha_pedido, fecha_entrega_estimada, total_pedido, observaciones || null]
+             (id_proveedor, fecha_pedido, fecha_entrega_estimada, total_pedido, estado_pago, monto_pagado, observaciones, fecha_creacion)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [id_proveedor, fecha_pedido, fecha_entrega_estimada, total_pedido, estadoPagoFinal, montoPagadoFinal, observaciones || null]
         );
 
         const idPedido = result.insertId;
@@ -159,22 +174,27 @@ export async function crearPedido(req, res) {
     }
 }
 
-// GET /api/pedidos?id_proveedor=&estado_general=&desde=&hasta=
+// GET /api/pedidos?id_proveedor=&estado_general=&estado_pago=&desde=&hasta=
 export async function listarPedidos(req, res) {
-    const { id_proveedor, estado_general, desde, hasta } = req.query;
+    const { id_proveedor, estado_general, estado_pago, desde, hasta } = req.query;
 
     try {
         let query = `
             SELECT
                 p.*,
                 pr.nombre AS proveedor,
-                CASE
-                    WHEN EXISTS (
-                        SELECT 1 FROM pedido_detalle pd
-                        WHERE pd.id_pedido = p.id_pedido AND pd.estado = 'PENDIENTE'
-                    ) THEN 'PENDIENTE'
-                    ELSE 'COMPLETO'
-                END AS estado_general
+                (
+                    SELECT
+                        CASE
+                            WHEN COUNT(*) = 0 THEN 'PENDIENTE'
+                            WHEN COUNT(CASE WHEN pd.estado = 'ENTREGADO' THEN 1 END) = COUNT(*) THEN 'COMPLETO'
+                            WHEN COUNT(CASE WHEN pd.estado = 'RECHAZADO' THEN 1 END) = COUNT(*) THEN 'RECHAZADO'
+                            WHEN COUNT(CASE WHEN pd.estado = 'PENDIENTE' THEN 1 END) = COUNT(*) THEN 'PENDIENTE'
+                            ELSE 'PARCIAL'
+                        END
+                    FROM pedido_detalle pd
+                    WHERE pd.id_pedido = p.id_pedido
+                ) AS estado_general
             FROM pedidos p
             JOIN proveedores pr ON pr.id_proveedor = p.id_proveedor
             WHERE 1=1
@@ -186,6 +206,11 @@ export async function listarPedidos(req, res) {
         if (id_proveedor) {
             query += ' AND p.id_proveedor = ?';
             params.push(id_proveedor);
+        }
+
+        if (estado_pago) {
+            query += ' AND p.estado_pago = ?';
+            params.push(estado_pago);
         }
 
         if (desde) {
@@ -233,7 +258,7 @@ export async function obtenerPedido(req, res) {
 // PUT /api/pedidos/:id
 export async function actualizarPedido(req, res) {
     const { id } = req.params;
-    const { id_proveedor, fecha_pedido, fecha_entrega_estimada, observaciones, detalle } = req.body;
+    const { id_proveedor, fecha_pedido, fecha_entrega_estimada, observaciones, detalle, estado_pago, monto_pagado } = req.body;
 
     const connection = await pool.getConnection();
     try {
@@ -250,15 +275,27 @@ export async function actualizarPedido(req, res) {
         const tieneLineaFinalizada = detallesActuales.some(
             d => d.estado === 'ENTREGADO' || d.estado === 'RECHAZADO'
         );
-        if (tieneLineaFinalizada) {
+        if (tieneLineaFinalizada && detalle !== undefined) {
             await connection.rollback();
-            return errorResponse(res, 409, 'No se puede editar el pedido porque tiene líneas ya recepcionadas o rechazadas');
+            return errorResponse(res, 409, 'No se puede editar el detalle del pedido porque tiene líneas ya recepcionadas o rechazadas');
         }
 
         const nuevoIdProveedor = id_proveedor !== undefined ? id_proveedor : pedidoActual.id_proveedor;
         const nuevaFechaPedido = fecha_pedido !== undefined ? fecha_pedido : pedidoActual.fecha_pedido;
         const nuevaFechaEntrega = fecha_entrega_estimada !== undefined ? fecha_entrega_estimada : pedidoActual.fecha_entrega_estimada;
         const nuevasObservaciones = observaciones !== undefined ? observaciones : pedidoActual.observaciones;
+        const nuevoEstadoPago = estado_pago !== undefined ? estado_pago : pedidoActual.estado_pago;
+        const nuevoMontoPagado = monto_pagado !== undefined ? Number(monto_pagado) : Number(pedidoActual.monto_pagado ?? 0);
+
+        if (!['PENDIENTE', 'PARCIAL', 'PAGADO'].includes(nuevoEstadoPago)) {
+            await connection.rollback();
+            return errorResponse(res, 400, "El campo estado_pago debe ser 'PENDIENTE', 'PARCIAL' o 'PAGADO'");
+        }
+
+        if (isNaN(nuevoMontoPagado) || nuevoMontoPagado < 0) {
+            await connection.rollback();
+            return errorResponse(res, 400, 'El campo monto_pagado debe ser numérico mayor o igual a 0');
+        }
 
         if (!(await existeProveedor(nuevoIdProveedor, connection))) {
             await connection.rollback();
@@ -283,12 +320,17 @@ export async function actualizarPedido(req, res) {
             nuevoTotal = calcularTotalPedido(detalle);
         }
 
+        if (nuevoMontoPagado > nuevoTotal) {
+            await connection.rollback();
+            return errorResponse(res, 400, 'El monto pagado no puede ser mayor al total del pedido');
+        }
+
         await connection.query(
             `UPDATE pedidos
              SET id_proveedor = ?, fecha_pedido = ?, fecha_entrega_estimada = ?,
-                 total_pedido = ?, observaciones = ?
+                 total_pedido = ?, estado_pago = ?, monto_pagado = ?, observaciones = ?
              WHERE id_pedido = ?`,
-            [nuevoIdProveedor, nuevaFechaPedido, nuevaFechaEntrega, nuevoTotal, nuevasObservaciones, id]
+            [nuevoIdProveedor, nuevaFechaPedido, nuevaFechaEntrega, nuevoTotal, nuevoEstadoPago, nuevoMontoPagado, nuevasObservaciones, id]
         );
 
         const pedidoRow = await existePedido(id, connection);
@@ -455,6 +497,62 @@ export async function rechazarDetalle(req, res) {
     } catch (error) {
         await connection.rollback();
         return errorResponse(res, 500, 'Error al rechazar detalle', error.message);
+    } finally {
+        connection.release();
+    }
+}
+
+// PATCH /api/pedidos/:id/pagar
+export async function registrarPago(req, res) {
+    const { id } = req.params;
+    const { monto } = req.body;
+
+    if (monto === undefined || isNaN(Number(monto)) || Number(monto) <= 0) {
+        return errorResponse(res, 400, 'El campo monto es requerido y debe ser numérico mayor a 0');
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const pedido = await existePedido(id, connection);
+        if (!pedido) {
+            await connection.rollback();
+            return errorResponse(res, 404, 'Pedido no encontrado');
+        }
+
+        const total = Number(pedido.total_pedido);
+        const pagadoActual = Number(pedido.monto_pagado ?? 0);
+        const nuevoPagado = pagadoActual + Number(monto);
+
+        if (nuevoPagado > total) {
+            await connection.rollback();
+            return errorResponse(res, 400, 'El monto total pagado no puede superar el total del pedido');
+        }
+
+        let nuevoEstadoPago = 'PARCIAL';
+        if (nuevoPagado === 0) {
+            nuevoEstadoPago = 'PENDIENTE';
+        } else if (nuevoPagado >= total) {
+            nuevoEstadoPago = 'PAGADO';
+        }
+
+        await connection.query(
+            `UPDATE pedidos
+             SET estado_pago = ?, monto_pagado = ?
+             WHERE id_pedido = ?`,
+            [nuevoEstadoPago, nuevoPagado, id]
+        );
+
+        const pedidoRow = await existePedido(id, connection);
+        const detallesRows = await obtenerDetallesPedido(id, connection);
+
+        await connection.commit();
+
+        res.json(formatPedidoCompleto(pedidoRow, detallesRows));
+    } catch (error) {
+        await connection.rollback();
+        return errorResponse(res, 500, 'Error al registrar pago', error.message);
     } finally {
         connection.release();
     }

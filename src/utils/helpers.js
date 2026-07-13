@@ -86,12 +86,17 @@ export function formatDetalle(row) {
  * El contrato solo incluye estos campos.
  */
 export function formatPedidoHeader(row) {
+    const total = Number(row.total_pedido);
+    const pagado = Number(row.monto_pagado ?? 0);
     return {
         id_pedido: row.id_pedido,
         proveedor: row.proveedor,
         fecha_pedido: toISOStringLocal(row.fecha_pedido),
         fecha_entrega_estimada: row.fecha_entrega_estimada,
-        total_pedido: Number(row.total_pedido),
+        total_pedido: total,
+        monto_pagado: pagado,
+        saldo_pendiente: Number((total - pagado).toFixed(2)),
+        estado_pago: row.estado_pago,
         estado_general: row.estado_general
     };
 }
@@ -116,12 +121,17 @@ export function formatRecepcionDetalle(row) {
  * Formatea un pedido completo para la respuesta (con detalle).
  */
 export function formatPedidoCompleto(row, detalles) {
+    const total = Number(row.total_pedido);
+    const pagado = Number(row.monto_pagado ?? 0);
     return {
         id_pedido: row.id_pedido,
         id_proveedor: row.id_proveedor,
         fecha_pedido: toISOStringLocal(row.fecha_pedido),
         fecha_entrega_estimada: row.fecha_entrega_estimada,
-        total_pedido: Number(row.total_pedido),
+        total_pedido: total,
+        monto_pagado: pagado,
+        saldo_pendiente: Number((total - pagado).toFixed(2)),
+        estado_pago: row.estado_pago,
         observaciones: row.observaciones,
         estado_general: calcularEstadoGeneral(detalles),
         detalle: detalles.map(formatDetalle)

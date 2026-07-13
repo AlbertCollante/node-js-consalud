@@ -226,6 +226,7 @@ app.post('/agregar-producto', async (req, res) => {
         nombre,
         categoria,
         stock_actual,
+        stock_inicial,
         stock_minimo,
         vencimiento,
         precio_caja,
@@ -252,6 +253,9 @@ app.post('/agregar-producto', async (req, res) => {
         });
     }
 
+    // Si no se envia stock_inicial, se toma el valor de stock_actual
+    const stockInicialFinal = stock_inicial !== undefined ? stock_inicial : stock_actual;
+
     try {
         // Calcular ganancia: precio_unitario * stock_actual
         const ganancia = precio_unitario * stock_actual;
@@ -262,6 +266,7 @@ app.post('/agregar-producto', async (req, res) => {
                 nombre,
                 categoria,
                 stock_actual,
+                stock_inicial,
                 stock_minimo,
                 vencimiento,
                 precio_caja,
@@ -271,12 +276,13 @@ app.post('/agregar-producto', async (req, res) => {
                 ganancia,
                 compra
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             marca,
             nombre,
             categoria,
             stock_actual,
+            stockInicialFinal,
             stock_minimo,
             vencimiento,
             precio_caja,
@@ -737,7 +743,7 @@ app.post('/actualizar-stock-venta', async (req, res) => {
 app.put('/actualizar-producto', async (req, res) => {
   const connection = await pool.getConnection();
   try {
-    const { id, nombre, marca, categoria, estante, stock_actual, stock_minimo,
+    const { id, nombre, marca, categoria, estante, stock_actual, stock_inicial, stock_minimo,
             costo_compra, precio_unitario, precio_blister, precio_caja,
             unidades_blister, blisters_caja, vencimiento, ubicacion } = req.body;
 
@@ -746,13 +752,13 @@ app.put('/actualizar-producto', async (req, res) => {
     const query = `
       UPDATE inventario_productos SET
         nombre = ?, marca = ?, categoria = ?, estante = ?,
-        stock_actual = ?, stock_minimo = ?, costo_compra = ?,
+        stock_actual = ?, stock_inicial = ?, stock_minimo = ?, costo_compra = ?,
         precio_unitario = ?, precio_blister = ?, precio_caja = ?,
         unidades_blister = ?, blisters_caja = ?, vencimiento = ?,
         ubicacion = ?
       WHERE id = ?
     `;
-    const values = [nombre, marca, categoria, estante, stock_actual, stock_minimo,
+    const values = [nombre, marca, categoria, estante, stock_actual, stock_inicial, stock_minimo,
                     costo_compra, precio_unitario, precio_blister, precio_caja,
                     unidades_blister, blisters_caja, vencimiento, ubicacion, id];
 
