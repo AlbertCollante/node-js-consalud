@@ -72,6 +72,7 @@ app.get('/users', async (req, res) => {
 
 // API para abrir turno: Crea un nuevo registro de apertura de turno con monto inicial y observaciones
 // Parámetros: usuario, montoInicial, observaciones (opcional)
+// La cuenta_efectivo inicia con el montoInicial y cuenta_yape inicia en 0.
 app.post('/apertura-turno', async (req, res) => {
     const { usuario, montoInicial, observaciones } = req.body;
 
@@ -79,17 +80,25 @@ app.post('/apertura-turno', async (req, res) => {
         return res.status(400).json({ error: 'usuario y montoInicial son requeridos' });
     }
 
+    const montoInicialNum = Number(montoInicial);
+    const cuentaEfectivoInicial = montoInicialNum;
+    const cuentaYapeInicial = 0;
+
     try {
         const [result] = await pool.query(
-            'INSERT INTO aperturas_turno (fecha, usuario, montoInicial, observaciones, estado) VALUES (NOW(), ?, ?, ?, ?)',
-            [usuario, montoInicial, observaciones, 'abierto']
+            `INSERT INTO aperturas_turno
+             (fecha, usuario, montoInicial, cuenta_efectivo, cuenta_yape, observaciones, estado)
+             VALUES (NOW(), ?, ?, ?, ?, ?, ?)`,
+            [usuario, montoInicialNum, cuentaEfectivoInicial, cuentaYapeInicial, observaciones, 'abierto']
         );
 
         res.status(201).json({
             id: result.insertId,
             fecha: new Date(),
             usuario,
-            montoInicial,
+            montoInicial: montoInicialNum,
+            cuenta_efectivo: cuentaEfectivoInicial,
+            cuenta_yape: cuentaYapeInicial,
             observaciones,
             estado: 'abierto'
         });
@@ -167,13 +176,21 @@ app.post('/cierre-turno', async (req, res) => {
     }
 
     try {
+        // Obtener el monto inicial de la apertura
+        const [aperturaRows] = await pool.query(
+            'SELECT montoInicial FROM aperturas_turno WHERE id = ?',
+            [aperturaId]
+        );
+
+        const montoInicial = aperturaRows.length > 0 ? Number(aperturaRows[0].montoInicial ?? 0) : 0;
+
         const [result] = await pool.query(
             `INSERT INTO cierre_turno
-            (fecha_hora, usuario, efectivo, yape, tarjeta,transferencia, total,observaciones,id_apertura)
+            (fecha_hora, usuario, monto_inicial, efectivo, yape, tarjeta,transferencia, total,observaciones,id_apertura)
             VALUES
-            (NOW(),?, ?, ?, ?, ?, ?, ?,?)`,
+            (NOW(),?, ?, ?, ?, ?, ?, ?, ?,?)`,
             [
-                usuario,efectivo,yape,tarjeta,transferencia,total,observaciones,aperturaId
+                usuario,montoInicial,efectivo,yape,tarjeta,transferencia,total,observaciones,aperturaId
             ]
         );
 
@@ -181,6 +198,7 @@ app.post('/cierre-turno', async (req, res) => {
             id: result.insertId,
             fecha_hora: new Date(),
             usuario,
+            monto_inicial: montoInicial,
             efectivo,
             yape,
             tarjeta,
@@ -216,6 +234,209 @@ app.get('/cierres', async (req, res) => {
     }
 });
 
+
+// ======================================================
+// APIs para modificar cuentas de apertura de turno
+// ======================================================
+
+// API para incrementar o establecer la cuenta en efectivo de una apertura
+// Body: { monto: number } para sumar al valor actual
+// Body opcional: { cuenta_efectivo: number } para establecer un valor exacto
+app.put('/actualizar-cuenta-efectivo/:id', async (req, res) => {
+    const { id } = req.params;
+    const { monto, cuenta_efectivo } = req.body;
+
+    if (!id || isNaN(Number(id))) {
+        return res.status(400).json({ error: 'ID de apertura inválido' });
+    }
+
+    try {
+        const [aperturaRows] = await pool.query(
+            'SELECT cuenta_efectivo FROM aperturas_turno WHERE id = ?',
+            [id]
+        );
+
+        if (aperturaRows.length === 0) {
+            return res.status(404).json({ error: 'Apertura no encontrada' });
+        }
+
+        let nuevoValor;
+        if (cuenta_efectivo !== undefined) {
+            if (isNaN(Number(cuenta_efectivo))) {
+                return res.status(400).json({ error: 'cuenta_efectivo debe ser numérico' });
+            }
+            nuevoValor = Number(cuenta_efectivo);
+        } else if (monto !== undefined) {
+            if (isNaN(Number(monto))) {
+                return res.status(400).json({ error: 'monto debe ser numérico' });
+            }
+            nuevoValor = Number(aperturaRows[0].cuenta_efectivo ?? 0) + Number(monto);
+        } else {
+            return res.status(400).json({ error: 'Debe enviar monto o cuenta_efectivo' });
+        }
+
+        await pool.query(
+            'UPDATE aperturas_turno SET cuenta_efectivo = ? WHERE id = ?',
+            [nuevoValor, id]
+        );
+
+        res.json({
+            mensaje: 'Cuenta en efectivo actualizada correctamente',
+            id_apertura: Number(id),
+            cuenta_efectivo: nuevoValor
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al actualizar cuenta en efectivo', details: error.message });
+    }
+});
+
+// API para incrementar o establecer la cuenta en yape de una apertura
+// Body: { monto: number } para sumar al valor actual
+// Body opcional: { cuenta_yape: number } para establecer un valor exacto
+app.put('/actualizar-cuenta-yape/:id', async (req, res) => {
+    const { id } = req.params;
+    const { monto, cuenta_yape } = req.body;
+
+    if (!id || isNaN(Number(id))) {
+        return res.status(400).json({ error: 'ID de apertura inválido' });
+    }
+
+    try {
+        const [aperturaRows] = await pool.query(
+            'SELECT cuenta_yape FROM aperturas_turno WHERE id = ?',
+            [id]
+        );
+
+        if (aperturaRows.length === 0) {
+            return res.status(404).json({ error: 'Apertura no encontrada' });
+        }
+
+        let nuevoValor;
+        if (cuenta_yape !== undefined) {
+            if (isNaN(Number(cuenta_yape))) {
+                return res.status(400).json({ error: 'cuenta_yape debe ser numérico' });
+            }
+            nuevoValor = Number(cuenta_yape);
+        } else if (monto !== undefined) {
+            if (isNaN(Number(monto))) {
+                return res.status(400).json({ error: 'monto debe ser numérico' });
+            }
+            nuevoValor = Number(aperturaRows[0].cuenta_yape ?? 0) + Number(monto);
+        } else {
+            return res.status(400).json({ error: 'Debe enviar monto o cuenta_yape' });
+        }
+
+        await pool.query(
+            'UPDATE aperturas_turno SET cuenta_yape = ? WHERE id = ?',
+            [nuevoValor, id]
+        );
+
+        res.json({
+            mensaje: 'Cuenta en yape actualizada correctamente',
+            id_apertura: Number(id),
+            cuenta_yape: nuevoValor
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al actualizar cuenta en yape', details: error.message });
+    }
+});
+
+// ======================================================
+// API: REGISTRAR MOVIMIENTO ENTRE CUENTAS
+// ======================================================
+// Registra un movimiento de dinero entre cuentas de una caja.
+// Body:
+// {
+//   "id_apertura": 87,
+//   "cuenta_origen": "EFECTIVO",
+//   "cuenta_destino": "YAPE",
+//   "monto": 50.00,
+//   "usuario": "Administrador 01",
+//   "observaciones": "Cambio de efectivo a yape"
+// }
+// ======================================================
+
+app.post('/movimientos-cuenta', async (req, res) => {
+    const { id_apertura, cuenta_origen, cuenta_destino, monto, usuario, observaciones } = req.body;
+
+    if (!id_apertura || !cuenta_origen || !cuenta_destino || monto === undefined || !usuario) {
+        return res.status(400).json({
+            error: 'id_apertura, cuenta_origen, cuenta_destino, monto y usuario son requeridos'
+        });
+    }
+
+    if (isNaN(Number(monto)) || Number(monto) <= 0) {
+        return res.status(400).json({ error: 'El monto debe ser numérico mayor a 0' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Verificar que la apertura exista
+        const [aperturaRows] = await connection.query(
+            'SELECT id FROM aperturas_turno WHERE id = ?',
+            [id_apertura]
+        );
+
+        if (aperturaRows.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Apertura no encontrada' });
+        }
+
+        const [result] = await connection.query(
+            `INSERT INTO movimientos_cuenta
+             (id_apertura, cuenta_origen, cuenta_destino, monto, usuario, observaciones, fecha_hora)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+            [id_apertura, cuenta_origen, cuenta_destino, Number(monto), usuario, observaciones || null]
+        );
+
+        await connection.commit();
+
+        res.status(201).json({
+            mensaje: 'Movimiento registrado correctamente',
+            id_movimiento: result.insertId,
+            id_apertura,
+            cuenta_origen,
+            cuenta_destino,
+            monto: Number(monto),
+            usuario,
+            observaciones: observaciones || null
+        });
+    } catch (error) {
+        await connection.rollback();
+        res.status(500).json({ error: 'Error al registrar movimiento', details: error.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// ======================================================
+// API: LISTAR MOVIMIENTOS ENTRE CUENTAS
+// ======================================================
+// Query params opcionales: ?id_apertura=87
+// ======================================================
+
+app.get('/movimientos-cuenta', async (req, res) => {
+    const { id_apertura } = req.query;
+
+    try {
+        let query = 'SELECT * FROM movimientos_cuenta';
+        const params = [];
+
+        if (id_apertura) {
+            query += ' WHERE id_apertura = ?';
+            params.push(id_apertura);
+        }
+
+        query += ' ORDER BY fecha_hora DESC';
+
+        const [result] = await pool.query(query, params);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al listar movimientos', details: error.message });
+    }
+});
 
 // Inventario
 

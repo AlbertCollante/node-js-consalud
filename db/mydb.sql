@@ -32,6 +32,8 @@ CREATE TABLE `aperturas_turno` (
   `fecha` datetime DEFAULT NULL,
   `usuario` varchar(100) DEFAULT NULL,
   `montoInicial` decimal(10,2) DEFAULT NULL,
+  `cuenta_efectivo` decimal(10,2) DEFAULT 0.00,
+  `cuenta_yape` decimal(10,2) DEFAULT 0.00,
   `observaciones` varchar(255) DEFAULT NULL,
   `estado` varchar(20) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -138,6 +140,7 @@ CREATE TABLE `cierre_turno` (
   `id` int(11) NOT NULL,
   `fecha_hora` datetime NOT NULL,
   `usuario` varchar(100) NOT NULL,
+  `monto_inicial` decimal(10,2) DEFAULT 0.00,
   `efectivo` decimal(10,2) DEFAULT 0.00,
   `yape` decimal(10,2) DEFAULT 0.00,
   `tarjeta` decimal(10,2) DEFAULT 0.00,
@@ -145,6 +148,23 @@ CREATE TABLE `cierre_turno` (
   `total` decimal(10,2) NOT NULL,
   `observaciones` varchar(500) DEFAULT NULL,
   `id_apertura` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `movimientos_cuenta`
+--
+
+CREATE TABLE `movimientos_cuenta` (
+  `id_movimiento` int(11) NOT NULL,
+  `id_apertura` int(11) NOT NULL,
+  `cuenta_origen` varchar(50) NOT NULL,
+  `cuenta_destino` varchar(50) NOT NULL,
+  `monto` decimal(10,2) NOT NULL,
+  `usuario` varchar(100) NOT NULL,
+  `observaciones` varchar(255) DEFAULT NULL,
+  `fecha_hora` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -4696,6 +4716,13 @@ ALTER TABLE `cierre_turno`
   ADD PRIMARY KEY (`id`);
 
 --
+-- Indices de la tabla `movimientos_cuenta`
+--
+ALTER TABLE `movimientos_cuenta`
+  ADD PRIMARY KEY (`id_movimiento`),
+  ADD KEY `fk_movimiento_apertura` (`id_apertura`);
+
+--
 -- Indices de la tabla `detalleservicio`
 --
 ALTER TABLE `detalleservicio`
@@ -4786,6 +4813,12 @@ ALTER TABLE `cierre_turno`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=87;
 
 --
+-- AUTO_INCREMENT de la tabla `movimientos_cuenta`
+--
+ALTER TABLE `movimientos_cuenta`
+  MODIFY `id_movimiento` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
 -- AUTO_INCREMENT de la tabla `detalleservicio`
 --
 ALTER TABLE `detalleservicio`
@@ -4873,6 +4906,12 @@ ALTER TABLE `detalle_venta`
 --
 ALTER TABLE `ventas_anuladas`
   ADD CONSTRAINT `fk_anulacion_venta` FOREIGN KEY (`idventa`) REFERENCES `ventas` (`id`) ON DELETE CASCADE;
+
+--
+-- Filtros para la tabla `movimientos_cuenta`
+--
+ALTER TABLE `movimientos_cuenta`
+  ADD CONSTRAINT `fk_movimiento_apertura` FOREIGN KEY (`id_apertura`) REFERENCES `aperturas_turno` (`id`) ON DELETE CASCADE;
 
 --
 -- Filtros para la tabla `pedidos`
