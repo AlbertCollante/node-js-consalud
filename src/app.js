@@ -175,16 +175,19 @@ app.post('/cierre-turno', async (req, res) => {
         });
     }
 
+    const connection = await pool.getConnection();
     try {
+        await connection.beginTransaction();
+
         // Obtener el monto inicial de la apertura
-        const [aperturaRows] = await pool.query(
+        const [aperturaRows] = await connection.query(
             'SELECT montoInicial FROM aperturas_turno WHERE id = ?',
             [aperturaId]
         );
 
         const montoInicial = aperturaRows.length > 0 ? Number(aperturaRows[0].montoInicial ?? 0) : 0;
 
-        const [result] = await pool.query(
+        const [result] = await connection.query(
             `INSERT INTO cierre_turno
             (fecha_hora, usuario, monto_inicial, efectivo, yape, tarjeta,transferencia, total,observaciones,id_apertura)
             VALUES
@@ -193,6 +196,11 @@ app.post('/cierre-turno', async (req, res) => {
                 usuario,montoInicial,efectivo,yape,tarjeta,transferencia,total,observaciones,aperturaId
             ]
         );
+
+        // Disparar contabilización automática del cierre de caja
+        const resumenContable = await contabilizarCierreCaja(connection, aperturaId, usuario);
+
+        await connection.commit();
 
         res.status(201).json({
             id: result.insertId,
@@ -205,14 +213,18 @@ app.post('/cierre-turno', async (req, res) => {
             transferencia,
             total,
             observaciones,
-            aperturaId       
+            aperturaId,
+            contabilidad: resumenContable
         });
 
     } catch (error) {
+        await connection.rollback();
         res.status(500).json({
             error: 'Error al registrar cierre de turno',
             details: error.message
         });
+    } finally {
+        connection.release();
     }
 });
 
@@ -1593,6 +1605,316 @@ app.post('/detalle-servicio', async (req, res) => {
 });
 
 
+
+// ======================================================
+// Helpers contables
+// ======================================================
+
+async function obtenerIdCuentaPorCodigo(connection, codigo) {
+    const [rows] = await connection.query(
+        'SELECT id_cuenta FROM cuentas_contables WHERE codigo = ?',
+        [codigo]
+    );
+    return rows.length > 0 ? rows[0].id_cuenta : null;
+}
+
+async function actualizarSaldoCuenta(connection, idCuenta, monto, tipo) {
+    const factor = tipo === 'INGRESO' ? 1 : -1;
+    await connection.query(
+        'UPDATE cuentas_contables SET saldo = saldo + ? WHERE id_cuenta = ?',
+        [monto * factor, idCuenta]
+    );
+
+    // Actualizar saldo de la cuenta padre si existe
+    const [padreRows] = await connection.query(
+        'SELECT cuenta_padre_id FROM cuentas_contables WHERE id_cuenta = ?',
+        [idCuenta]
+    );
+
+    if (padreRows.length > 0 && padreRows[0].cuenta_padre_id) {
+        await actualizarSaldoCuenta(connection, padreRows[0].cuenta_padre_id, monto, tipo);
+    }
+}
+
+async function insertarMovimientoContable(connection, { id_cuenta, id_apertura, monto, tipo, concepto, usuario, origen }) {
+    await connection.query(
+        `INSERT INTO movimientos_contables
+         (id_cuenta, id_apertura, monto, tipo, concepto, usuario, origen, fecha_hora)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [id_cuenta, id_apertura || null, monto, tipo, concepto, usuario, origen]
+    );
+
+    await actualizarSaldoCuenta(connection, id_cuenta, monto, tipo);
+}
+
+async function contabilizarCierreCaja(connection, idApertura, usuario) {
+    // Ventas activas de la apertura
+    const [ventasRows] = await connection.query(
+        `SELECT COALESCE(SUM(total), 0) AS total_ventas
+         FROM ventas
+         WHERE estado = 'activa' AND id_apertura = ?`,
+        [idApertura]
+    );
+    const totalVentas = Number(ventasRows[0].total_ventas);
+
+    // Ganancia y costo de ventas
+    const [ventasDetalleRows] = await connection.query(
+        `SELECT
+            COALESCE(SUM(dv.cantidad * (dv.precio - dv.costo_compra)), 0) AS ganancia_ventas,
+            COALESCE(SUM(dv.cantidad * dv.costo_compra), 0) AS costo_ventas
+         FROM detalle_venta dv
+         JOIN ventas v ON v.id = dv.idventa
+         WHERE v.estado = 'activa' AND v.id_apertura = ?`,
+        [idApertura]
+    );
+    const gananciaVentas = Number(ventasDetalleRows[0].ganancia_ventas);
+    const costoVentas = Number(ventasDetalleRows[0].costo_ventas);
+
+    // Ingresos por servicios
+    const [serviciosRows] = await connection.query(
+        `SELECT COALESCE(SUM(subtotal), 0) AS total_servicios
+         FROM servicio
+         WHERE idapertura = ?`,
+        [idApertura]
+    );
+    const totalServicios = Number(serviciosRows[0].total_servicios);
+
+    // Costo de productos usados en servicios
+    const [serviciosCostoRows] = await connection.query(
+        `SELECT COALESCE(SUM(ds.cantidad * ip.costo_compra), 0) AS costo_servicios
+         FROM detalleservicio ds
+         JOIN servicio s ON s.idserviciodado = ds.idserviciodado
+         JOIN inventario_productos ip ON ip.id = ds.idproducto
+         WHERE s.idapertura = ?`,
+        [idApertura]
+    );
+    const costoServicios = Number(serviciosCostoRows[0].costo_servicios);
+
+    const totalIngresos = totalVentas + totalServicios;
+    const gananciaServicios = totalServicios - costoServicios;
+    const gananciaNeta = gananciaVentas + gananciaServicios;
+    const costoTotal = costoVentas + costoServicios;
+
+    // Validar que 1010 + 1020 = total de ingresos
+    const diferencia = Number((totalIngresos - (gananciaNeta + costoTotal)).toFixed(2));
+    if (Math.abs(diferencia) > 0.01) {
+        throw new Error(`Descuadre contable: ingresos (${totalIngresos}) != ganancia (${gananciaNeta}) + costo (${costoTotal}). Diferencia: ${diferencia}`);
+    }
+
+    const idCuenta1010 = await obtenerIdCuentaPorCodigo(connection, '1010');
+    const idCuenta1020 = await obtenerIdCuentaPorCodigo(connection, '1020');
+
+    if (!idCuenta1010 || !idCuenta1020) {
+        throw new Error('No se encontraron las cuentas contables base (1010, 1020)');
+    }
+
+    // Nota: la cuenta 10 (Ingresos) es totalizadora, no se registra movimiento directo.
+    // Su saldo se actualiza automaticamente al actualizar las cuentas hijas 1010 y 1020.
+
+    if (gananciaNeta > 0) {
+        await insertarMovimientoContable(connection, {
+            id_cuenta: idCuenta1010,
+            id_apertura: idApertura,
+            monto: gananciaNeta,
+            tipo: 'INGRESO',
+            concepto: `Ganancia neta - caja ${idApertura}`,
+            usuario,
+            origen: 'CIERRE_CAJA'
+        });
+    }
+
+    if (costoTotal > 0) {
+        await insertarMovimientoContable(connection, {
+            id_cuenta: idCuenta1020,
+            id_apertura: idApertura,
+            monto: costoTotal,
+            tipo: 'INGRESO',
+            concepto: `Costo de productos - caja ${idApertura}`,
+            usuario,
+            origen: 'CIERRE_CAJA'
+        });
+    }
+
+    return {
+        total_ingresos: totalIngresos,
+        ganancia_neta: gananciaNeta,
+        costo_total: costoTotal
+    };
+}
+
+// ======================================================
+// API: CUENTAS CONTABLES
+// ======================================================
+
+// Crear cuenta contable
+app.post('/cuentas-contables', async (req, res) => {
+    const { codigo, nombre, tipo, cuenta_padre_id } = req.body;
+
+    if (!codigo || !nombre || !tipo) {
+        return res.status(400).json({ error: 'codigo, nombre y tipo son requeridos' });
+    }
+
+    if (!['INGRESO', 'EGRESO'].includes(tipo)) {
+        return res.status(400).json({ error: "El tipo debe ser 'INGRESO' o 'EGRESO'" });
+    }
+
+    try {
+        const [result] = await pool.query(
+            `INSERT INTO cuentas_contables (codigo, nombre, tipo, saldo, es_totalizadora, cuenta_padre_id)
+             VALUES (?, ?, ?, 0, ?, ?)`,
+            [codigo, nombre, tipo, cuenta_padre_id ? 0 : 1, cuenta_padre_id || null]
+        );
+
+        res.status(201).json({
+            mensaje: 'Cuenta contable creada correctamente',
+            id_cuenta: result.insertId,
+            codigo,
+            nombre,
+            tipo,
+            saldo: 0,
+            cuenta_padre_id: cuenta_padre_id || null
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al crear cuenta contable', details: error.message });
+    }
+});
+
+// Listar cuentas contables
+app.get('/cuentas-contables', async (req, res) => {
+    try {
+        const [result] = await pool.query(`
+            SELECT
+                cc.id_cuenta,
+                cc.codigo,
+                cc.nombre,
+                cc.tipo,
+                cc.saldo,
+                cc.es_totalizadora,
+                cc.cuenta_padre_id,
+                cp.nombre AS cuenta_padre
+            FROM cuentas_contables cc
+            LEFT JOIN cuentas_contables cp ON cp.id_cuenta = cc.cuenta_padre_id
+            ORDER BY cc.codigo ASC
+        `);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al listar cuentas contables', details: error.message });
+    }
+});
+
+// ======================================================
+// API: MOVIMIENTOS CONTABLES
+// ======================================================
+
+// Registrar movimiento contable manual
+app.post('/movimientos-contables', async (req, res) => {
+    const { id_cuenta, id_apertura, monto, tipo, concepto, usuario } = req.body;
+
+    if (!id_cuenta || monto === undefined || !tipo || !concepto || !usuario) {
+        return res.status(400).json({
+            error: 'id_cuenta, monto, tipo, concepto y usuario son requeridos'
+        });
+    }
+
+    if (!['INGRESO', 'EGRESO'].includes(tipo)) {
+        return res.status(400).json({ error: "El tipo debe ser 'INGRESO' o 'EGRESO'" });
+    }
+
+    if (isNaN(Number(monto)) || Number(monto) <= 0) {
+        return res.status(400).json({ error: 'El monto debe ser numérico mayor a 0' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Verificar que la cuenta exista
+        const [cuentaRows] = await connection.query(
+            'SELECT id_cuenta FROM cuentas_contables WHERE id_cuenta = ?',
+            [id_cuenta]
+        );
+
+        if (cuentaRows.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Cuenta contable no encontrada' });
+        }
+
+        await insertarMovimientoContable(connection, {
+            id_cuenta,
+            id_apertura,
+            monto: Number(monto),
+            tipo,
+            concepto,
+            usuario,
+            origen: 'MANUAL'
+        });
+
+        await connection.commit();
+
+        res.status(201).json({
+            mensaje: 'Movimiento contable registrado correctamente',
+            id_cuenta,
+            id_apertura: id_apertura || null,
+            monto: Number(monto),
+            tipo,
+            concepto,
+            usuario
+        });
+    } catch (error) {
+        await connection.rollback();
+        res.status(500).json({ error: 'Error al registrar movimiento contable', details: error.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// Listar movimientos contables
+app.get('/movimientos-contables', async (req, res) => {
+    const { id_cuenta, id_apertura, origen } = req.query;
+
+    try {
+        let query = `
+            SELECT
+                mc.id_movimiento,
+                mc.id_cuenta,
+                cc.codigo AS codigo_cuenta,
+                cc.nombre AS nombre_cuenta,
+                mc.id_apertura,
+                mc.monto,
+                mc.tipo,
+                mc.concepto,
+                mc.usuario,
+                mc.origen,
+                mc.fecha_hora
+            FROM movimientos_contables mc
+            JOIN cuentas_contables cc ON cc.id_cuenta = mc.id_cuenta
+            WHERE 1=1
+        `;
+        const params = [];
+
+        if (id_cuenta) {
+            query += ' AND mc.id_cuenta = ?';
+            params.push(id_cuenta);
+        }
+
+        if (id_apertura) {
+            query += ' AND mc.id_apertura = ?';
+            params.push(id_apertura);
+        }
+
+        if (origen) {
+            query += ' AND mc.origen = ?';
+            params.push(origen);
+        }
+
+        query += ' ORDER BY mc.fecha_hora DESC';
+
+        const [result] = await pool.query(query, params);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al listar movimientos contables', details: error.message });
+    }
+});
 
 // ======================================================
 // Módulos de proveedores y pedidos

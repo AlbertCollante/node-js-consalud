@@ -167,6 +167,54 @@ CREATE TABLE `movimientos_cuenta` (
   `fecha_hora` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `cuentas_contables`
+--
+
+CREATE TABLE `cuentas_contables` (
+  `id_cuenta` int(11) NOT NULL,
+  `codigo` varchar(20) NOT NULL,
+  `nombre` varchar(100) NOT NULL,
+  `tipo` enum('INGRESO','EGRESO') NOT NULL,
+  `saldo` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `es_totalizadora` tinyint(1) NOT NULL DEFAULT 0,
+  `cuenta_padre_id` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Volcado de datos para la tabla `cuentas_contables`
+--
+
+INSERT INTO `cuentas_contables` (`id_cuenta`, `codigo`, `nombre`, `tipo`, `saldo`, `es_totalizadora`, `cuenta_padre_id`) VALUES
+(1, '10', 'Ingresos', 'INGRESO', 0.00, 1, NULL),
+(2, '1010', 'Ganancia', 'INGRESO', 0.00, 0, 1),
+(3, '1020', 'Costo de producto', 'INGRESO', 0.00, 0, 1),
+(4, '1030', 'Otros', 'INGRESO', 0.00, 0, 1),
+(5, '50', 'Egresos', 'EGRESO', 0.00, 1, NULL),
+(6, '5010', 'Pago trabajadores', 'EGRESO', 0.00, 0, 5),
+(7, '5020', 'Compra mercaderia', 'EGRESO', 0.00, 0, 5),
+(8, '5030', 'Otros', 'EGRESO', 0.00, 0, 5);
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `movimientos_contables`
+--
+
+CREATE TABLE `movimientos_contables` (
+  `id_movimiento` int(11) NOT NULL,
+  `id_cuenta` int(11) NOT NULL,
+  `id_apertura` int(11) DEFAULT NULL,
+  `monto` decimal(10,2) NOT NULL,
+  `tipo` enum('INGRESO','EGRESO') NOT NULL,
+  `concepto` varchar(255) NOT NULL,
+  `usuario` varchar(100) NOT NULL,
+  `origen` enum('MANUAL','CIERRE_CAJA') NOT NULL DEFAULT 'MANUAL',
+  `fecha_hora` datetime NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 --
 -- Volcado de datos para la tabla `cierre_turno`
 --
@@ -4723,6 +4771,22 @@ ALTER TABLE `movimientos_cuenta`
   ADD KEY `fk_movimiento_apertura` (`id_apertura`);
 
 --
+-- Indices de la tabla `cuentas_contables`
+--
+ALTER TABLE `cuentas_contables`
+  ADD PRIMARY KEY (`id_cuenta`),
+  ADD UNIQUE KEY `uk_codigo` (`codigo`),
+  ADD KEY `fk_cuenta_padre` (`cuenta_padre_id`);
+
+--
+-- Indices de la tabla `movimientos_contables`
+--
+ALTER TABLE `movimientos_contables`
+  ADD PRIMARY KEY (`id_movimiento`),
+  ADD KEY `fk_movimiento_contable_cuenta` (`id_cuenta`),
+  ADD KEY `fk_movimiento_contable_apertura` (`id_apertura`);
+
+--
 -- Indices de la tabla `detalleservicio`
 --
 ALTER TABLE `detalleservicio`
@@ -4819,6 +4883,18 @@ ALTER TABLE `movimientos_cuenta`
   MODIFY `id_movimiento` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
+-- AUTO_INCREMENT de la tabla `cuentas_contables`
+--
+ALTER TABLE `cuentas_contables`
+  MODIFY `id_cuenta` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
+
+--
+-- AUTO_INCREMENT de la tabla `movimientos_contables`
+--
+ALTER TABLE `movimientos_contables`
+  MODIFY `id_movimiento` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
 -- AUTO_INCREMENT de la tabla `detalleservicio`
 --
 ALTER TABLE `detalleservicio`
@@ -4912,6 +4988,19 @@ ALTER TABLE `ventas_anuladas`
 --
 ALTER TABLE `movimientos_cuenta`
   ADD CONSTRAINT `fk_movimiento_apertura` FOREIGN KEY (`id_apertura`) REFERENCES `aperturas_turno` (`id`) ON DELETE CASCADE;
+
+--
+-- Filtros para la tabla `cuentas_contables`
+--
+ALTER TABLE `cuentas_contables`
+  ADD CONSTRAINT `fk_cuenta_padre` FOREIGN KEY (`cuenta_padre_id`) REFERENCES `cuentas_contables` (`id_cuenta`) ON DELETE SET NULL;
+
+--
+-- Filtros para la tabla `movimientos_contables`
+--
+ALTER TABLE `movimientos_contables`
+  ADD CONSTRAINT `fk_movimiento_contable_cuenta` FOREIGN KEY (`id_cuenta`) REFERENCES `cuentas_contables` (`id_cuenta`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_movimiento_contable_apertura` FOREIGN KEY (`id_apertura`) REFERENCES `aperturas_turno` (`id`) ON DELETE SET NULL;
 
 --
 -- Filtros para la tabla `pedidos`
