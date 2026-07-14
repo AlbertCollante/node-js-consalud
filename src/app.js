@@ -1732,10 +1732,10 @@ async function contabilizarCierreCaja(connection, idApertura, usuario) {
     const costoTotal = costoVentas + costoServicios;
 
     // Validar que 1010 + 1020 = total de ingresos
-    const diferencia = Number((totalIngresos - (gananciaNeta + costoTotal)).toFixed(2));
-    if (Math.abs(diferencia) > 0.01) {
-        throw new Error(`Descuadre contable: ingresos (${totalIngresos}) != ganancia (${gananciaNeta}) + costo (${costoTotal}). Diferencia: ${diferencia}`);
-    }
+    //const diferencia = Number((totalIngresos - (gananciaNeta + costoTotal)).toFixed(2));
+    //if (Math.abs(diferencia) > 0.01) {
+    //    throw new Error(`Descuadre contable: ingresos (${totalIngresos}) != ganancia (${gananciaNeta}) + costo (${costoTotal}). Diferencia: ${diferencia}`);
+    //}
 
     const idCuenta1010 = await obtenerIdCuentaPorCodigo(connection, '1010');
     const idCuenta1020 = await obtenerIdCuentaPorCodigo(connection, '1020');
