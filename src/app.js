@@ -71,25 +71,31 @@ app.get('/users', async (req, res) => {
 });
 
 // API para abrir turno: Crea un nuevo registro de apertura de turno con monto inicial y observaciones
-// Parámetros: usuario, montoInicial, observaciones (opcional)
-// La cuenta_efectivo inicia con el montoInicial y cuenta_yape inicia en 0.
+// Parámetros: usuario, montoInicial, cuenta_efectivo, cuenta_yape, observaciones (opcional)
+// El frontend envía los valores iniciales de las cuentas.
 app.post('/apertura-turno', async (req, res) => {
-    const { usuario, montoInicial, observaciones } = req.body;
+    const { usuario, montoInicial, cuenta_efectivo, cuenta_yape, observaciones } = req.body;
 
-    if (!usuario || montoInicial === undefined) {
-        return res.status(400).json({ error: 'usuario y montoInicial son requeridos' });
+    if (!usuario || montoInicial === undefined || cuenta_efectivo === undefined || cuenta_yape === undefined) {
+        return res.status(400).json({
+            error: 'usuario, montoInicial, cuenta_efectivo y cuenta_yape son requeridos'
+        });
     }
 
     const montoInicialNum = Number(montoInicial);
-    const cuentaEfectivoInicial = montoInicialNum;
-    const cuentaYapeInicial = 0;
+    const cuentaEfectivoNum = Number(cuenta_efectivo);
+    const cuentaYapeNum = Number(cuenta_yape);
+
+    if (isNaN(montoInicialNum) || isNaN(cuentaEfectivoNum) || isNaN(cuentaYapeNum)) {
+        return res.status(400).json({ error: 'montoInicial, cuenta_efectivo y cuenta_yape deben ser numéricos' });
+    }
 
     try {
         const [result] = await pool.query(
             `INSERT INTO aperturas_turno
              (fecha, usuario, montoInicial, cuenta_efectivo, cuenta_yape, observaciones, estado)
              VALUES (NOW(), ?, ?, ?, ?, ?, ?)`,
-            [usuario, montoInicialNum, cuentaEfectivoInicial, cuentaYapeInicial, observaciones, 'abierto']
+            [usuario, montoInicialNum, cuentaEfectivoNum, cuentaYapeNum, observaciones, 'abierto']
         );
 
         res.status(201).json({
@@ -97,8 +103,8 @@ app.post('/apertura-turno', async (req, res) => {
             fecha: new Date(),
             usuario,
             montoInicial: montoInicialNum,
-            cuenta_efectivo: cuentaEfectivoInicial,
-            cuenta_yape: cuentaYapeInicial,
+            cuenta_efectivo: cuentaEfectivoNum,
+            cuenta_yape: cuentaYapeNum,
             observaciones,
             estado: 'abierto'
         });
@@ -463,6 +469,7 @@ app.post('/agregar-producto', async (req, res) => {
         stock_minimo,
         vencimiento,
         precio_caja,
+        precio_blister,
         costo_compra,
         precio_unitario,
         estante
@@ -475,19 +482,20 @@ app.post('/agregar-producto', async (req, res) => {
         !categoria ||
         stock_actual === undefined ||
         stock_minimo === undefined ||
-        !vencimiento ||
-        precio_caja === undefined ||
         costo_compra === undefined ||
         precio_unitario === undefined ||
         !estante
     ) {
         return res.status(400).json({
-            error: 'Todos los campos son requeridos: marca, nombre, categoria, stock_actual, stock_minimo, vencimiento, precio_caja, costo_compra, precio_unitario, estante'
+            error: 'Todos los campos son requeridos: marca, nombre, categoria, stock_actual, stock_minimo, costo_compra, precio_unitario, estante'
         });
     }
 
-    // Si no se envia stock_inicial, se toma el valor de stock_actual
+    // Si no se envian campos opcionales, se guardan como null
     const stockInicialFinal = stock_inicial !== undefined ? stock_inicial : stock_actual;
+    const vencimientoFinal = vencimiento !== undefined && vencimiento !== '' ? vencimiento : null;
+    const precioCajaFinal = precio_caja !== undefined && precio_caja !== '' ? precio_caja : null;
+    const precioBlisterFinal = precio_blister !== undefined && precio_blister !== '' ? precio_blister : null;
 
     try {
         // Calcular ganancia: precio_unitario * stock_actual
@@ -503,13 +511,14 @@ app.post('/agregar-producto', async (req, res) => {
                 stock_minimo,
                 vencimiento,
                 precio_caja,
+                precio_blister,
                 costo_compra,
                 precio_unitario,
                 estante,
                 ganancia,
                 compra
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             marca,
             nombre,
@@ -517,8 +526,9 @@ app.post('/agregar-producto', async (req, res) => {
             stock_actual,
             stockInicialFinal,
             stock_minimo,
-            vencimiento,
-            precio_caja,
+            vencimientoFinal,
+            precioCajaFinal,
+            precioBlisterFinal,
             costo_compra,
             precio_unitario,
             estante,
@@ -1002,6 +1012,32 @@ app.put('/actualizar-producto', async (req, res) => {
     res.status(500).json({ error: err.message });
   } finally {
     connection.release();
+  }
+});
+
+// API para eliminar un producto del inventario
+// Solo elimina de la tabla inventario_productos, no afecta otras tablas.
+app.delete('/eliminar-producto/:id', async (req, res) => {
+  const { id } = req.params;
+
+  if (!id || isNaN(Number(id))) {
+    return res.status(400).json({ error: 'ID de producto inválido' });
+  }
+
+  try {
+    const [result] = await pool.query(
+      'DELETE FROM inventario_productos WHERE id = ?',
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    res.json({ success: true, message: 'Producto eliminado correctamente' });
+  } catch (err) {
+    console.error('Error eliminando producto:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
