@@ -32,6 +32,7 @@ CREATE TABLE `aperturas_turno` (
   `fecha` datetime DEFAULT NULL,
   `usuario` varchar(100) DEFAULT NULL,
   `montoInicial` decimal(10,2) DEFAULT NULL,
+  `monto_inicial_yape` decimal(10,2) DEFAULT 0.00,
   `cuenta_efectivo` decimal(10,2) DEFAULT 0.00,
   `cuenta_yape` decimal(10,2) DEFAULT 0.00,
   `observaciones` varchar(255) DEFAULT NULL,
@@ -162,6 +163,8 @@ CREATE TABLE `movimientos_cuenta` (
   `cuenta_origen` varchar(50) NOT NULL,
   `cuenta_destino` varchar(50) NOT NULL,
   `monto` decimal(10,2) NOT NULL,
+  `comision` decimal(10,2) DEFAULT 0.00,
+  `cuenta_comision` varchar(50) DEFAULT NULL,
   `usuario` varchar(100) NOT NULL,
   `observaciones` varchar(255) DEFAULT NULL,
   `fecha_hora` datetime NOT NULL DEFAULT current_timestamp()

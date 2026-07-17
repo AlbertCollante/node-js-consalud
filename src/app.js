@@ -71,31 +71,32 @@ app.get('/users', async (req, res) => {
 });
 
 // API para abrir turno: Crea un nuevo registro de apertura de turno con monto inicial y observaciones
-// Parámetros: usuario, montoInicial, cuenta_efectivo, cuenta_yape, observaciones (opcional)
+// Parámetros: usuario, montoInicial, montoInicialYape, cuenta_efectivo, cuenta_yape, observaciones (opcional)
 // El frontend envía los valores iniciales de las cuentas.
 app.post('/apertura-turno', async (req, res) => {
-    const { usuario, montoInicial, cuenta_efectivo, cuenta_yape, observaciones } = req.body;
+    const { usuario, montoInicial, montoInicialYape, cuenta_efectivo, cuenta_yape, observaciones } = req.body;
 
-    if (!usuario || montoInicial === undefined || cuenta_efectivo === undefined || cuenta_yape === undefined) {
+    if (!usuario || montoInicial === undefined || montoInicialYape === undefined || cuenta_efectivo === undefined || cuenta_yape === undefined) {
         return res.status(400).json({
-            error: 'usuario, montoInicial, cuenta_efectivo y cuenta_yape son requeridos'
+            error: 'usuario, montoInicial, montoInicialYape, cuenta_efectivo y cuenta_yape son requeridos'
         });
     }
 
     const montoInicialNum = Number(montoInicial);
+    const montoInicialYapeNum = Number(montoInicialYape);
     const cuentaEfectivoNum = Number(cuenta_efectivo);
     const cuentaYapeNum = Number(cuenta_yape);
 
-    if (isNaN(montoInicialNum) || isNaN(cuentaEfectivoNum) || isNaN(cuentaYapeNum)) {
-        return res.status(400).json({ error: 'montoInicial, cuenta_efectivo y cuenta_yape deben ser numéricos' });
+    if (isNaN(montoInicialNum) || isNaN(montoInicialYapeNum) || isNaN(cuentaEfectivoNum) || isNaN(cuentaYapeNum)) {
+        return res.status(400).json({ error: 'montoInicial, montoInicialYape, cuenta_efectivo y cuenta_yape deben ser numéricos' });
     }
 
     try {
         const [result] = await pool.query(
             `INSERT INTO aperturas_turno
-             (fecha, usuario, montoInicial, cuenta_efectivo, cuenta_yape, observaciones, estado)
-             VALUES (NOW(), ?, ?, ?, ?, ?, ?)`,
-            [usuario, montoInicialNum, cuentaEfectivoNum, cuentaYapeNum, observaciones, 'abierto']
+             (fecha, usuario, montoInicial, monto_inicial_yape, cuenta_efectivo, cuenta_yape, observaciones, estado)
+             VALUES (NOW(), ?, ?, ?, ?, ?, ?, ?)`,
+            [usuario, montoInicialNum, montoInicialYapeNum, cuentaEfectivoNum, cuentaYapeNum, observaciones, 'abierto']
         );
 
         res.status(201).json({
@@ -103,6 +104,7 @@ app.post('/apertura-turno', async (req, res) => {
             fecha: new Date(),
             usuario,
             montoInicial: montoInicialNum,
+            monto_inicial_yape: montoInicialYapeNum,
             cuenta_efectivo: cuentaEfectivoNum,
             cuenta_yape: cuentaYapeNum,
             observaciones,
@@ -369,13 +371,15 @@ app.put('/actualizar-cuenta-yape/:id', async (req, res) => {
 //   "cuenta_origen": "EFECTIVO",
 //   "cuenta_destino": "YAPE",
 //   "monto": 50.00,
+//   "comision": 2.50,
+//   "cuenta_comision": "EFECTIVO",
 //   "usuario": "Administrador 01",
 //   "observaciones": "Cambio de efectivo a yape"
 // }
 // ======================================================
 
 app.post('/movimientos-cuenta', async (req, res) => {
-    const { id_apertura, cuenta_origen, cuenta_destino, monto, usuario, observaciones } = req.body;
+    const { id_apertura, cuenta_origen, cuenta_destino, monto, comision, cuenta_comision, usuario, observaciones } = req.body;
 
     if (!id_apertura || !cuenta_origen || !cuenta_destino || monto === undefined || !usuario) {
         return res.status(400).json({
@@ -385,6 +389,19 @@ app.post('/movimientos-cuenta', async (req, res) => {
 
     if (isNaN(Number(monto)) || Number(monto) <= 0) {
         return res.status(400).json({ error: 'El monto debe ser numérico mayor a 0' });
+    }
+
+    const comisionNum = comision !== undefined ? Number(comision) : 0;
+    if (isNaN(comisionNum) || comisionNum < 0) {
+        return res.status(400).json({ error: 'La comision debe ser numérica mayor o igual a 0' });
+    }
+
+    if (comisionNum > 0 && !cuenta_comision) {
+        return res.status(400).json({ error: 'cuenta_comision es requerida cuando comision es mayor a 0' });
+    }
+
+    if (cuenta_comision && !['EFECTIVO', 'YAPE'].includes(cuenta_comision.toUpperCase())) {
+        return res.status(400).json({ error: 'cuenta_comision debe ser EFECTIVO o YAPE' });
     }
 
     const connection = await pool.getConnection();
@@ -404,9 +421,18 @@ app.post('/movimientos-cuenta', async (req, res) => {
 
         const [result] = await connection.query(
             `INSERT INTO movimientos_cuenta
-             (id_apertura, cuenta_origen, cuenta_destino, monto, usuario, observaciones, fecha_hora)
-             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-            [id_apertura, cuenta_origen, cuenta_destino, Number(monto), usuario, observaciones || null]
+             (id_apertura, cuenta_origen, cuenta_destino, monto, comision, cuenta_comision, usuario, observaciones, fecha_hora)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [
+                id_apertura,
+                cuenta_origen,
+                cuenta_destino,
+                Number(monto),
+                comisionNum,
+                cuenta_comision ? cuenta_comision.toUpperCase() : null,
+                usuario,
+                observaciones || null
+            ]
         );
 
         await connection.commit();
@@ -418,6 +444,8 @@ app.post('/movimientos-cuenta', async (req, res) => {
             cuenta_origen,
             cuenta_destino,
             monto: Number(monto),
+            comision: comisionNum,
+            cuenta_comision: cuenta_comision ? cuenta_comision.toUpperCase() : null,
             usuario,
             observaciones: observaciones || null
         });
