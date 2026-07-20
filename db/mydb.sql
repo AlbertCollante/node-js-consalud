@@ -180,7 +180,7 @@ CREATE TABLE `cuentas_contables` (
   `id_cuenta` int(11) NOT NULL,
   `codigo` varchar(20) NOT NULL,
   `nombre` varchar(100) NOT NULL,
-  `tipo` enum('INGRESO','EGRESO') NOT NULL,
+  `tipo` enum('INGRESO','EGRESO','ACTIVO') NOT NULL,
   `saldo` decimal(10,2) NOT NULL DEFAULT 0.00,
   `es_totalizadora` tinyint(1) NOT NULL DEFAULT 0,
   `cuenta_padre_id` int(11) DEFAULT NULL
@@ -198,7 +198,10 @@ INSERT INTO `cuentas_contables` (`id_cuenta`, `codigo`, `nombre`, `tipo`, `saldo
 (5, '50', 'Egresos', 'EGRESO', 0.00, 1, NULL),
 (6, '5010', 'Pago trabajadores', 'EGRESO', 0.00, 0, 5),
 (7, '5020', 'Compra mercaderia', 'EGRESO', 0.00, 0, 5),
-(8, '5030', 'Otros', 'EGRESO', 0.00, 0, 5);
+(8, '5030', 'Otros', 'EGRESO', 0.00, 0, 5),
+(9, '30', 'Dinero Disponible', 'ACTIVO', 0.00, 1, NULL),
+(10, '3010', 'Efectivo', 'ACTIVO', 0.00, 0, 9),
+(11, '3020', 'Yape', 'ACTIVO', 0.00, 0, 9);
 
 -- --------------------------------------------------------
 

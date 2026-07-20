@@ -4,6 +4,7 @@ import { pool } from './db.js';
 import { PORT } from './config.js';
 import proveedoresRoutes from './routes/proveedores.routes.js';
 import pedidosRoutes from './routes/pedidos.routes.js';
+import usuariosRoutes from './routes/usuarios.routes.js';
 
 const app = express();
 
@@ -1683,7 +1684,7 @@ async function obtenerIdCuentaPorCodigo(connection, codigo) {
 }
 
 async function actualizarSaldoCuenta(connection, idCuenta, monto, tipo) {
-    const factor = tipo === 'INGRESO' ? 1 : -1;
+    const factor = (tipo === 'INGRESO' || tipo === 'ACTIVO') ? 1 : -1;
     await connection.query(
         'UPDATE cuentas_contables SET saldo = saldo + ? WHERE id_cuenta = ?',
         [monto * factor, idCuenta]
@@ -1818,8 +1819,8 @@ app.post('/cuentas-contables', async (req, res) => {
         return res.status(400).json({ error: 'codigo, nombre y tipo son requeridos' });
     }
 
-    if (!['INGRESO', 'EGRESO'].includes(tipo)) {
-        return res.status(400).json({ error: "El tipo debe ser 'INGRESO' o 'EGRESO'" });
+    if (!['INGRESO', 'EGRESO', 'ACTIVO'].includes(tipo)) {
+        return res.status(400).json({ error: "El tipo debe ser 'INGRESO', 'EGRESO' o 'ACTIVO'" });
     }
 
     try {
@@ -1981,10 +1982,11 @@ app.get('/movimientos-contables', async (req, res) => {
 });
 
 // ======================================================
-// Módulos de proveedores y pedidos
+// Módulos de proveedores, pedidos y usuarios
 // ======================================================
 app.use('/api/proveedores', proveedoresRoutes);
 app.use('/api/pedidos', pedidosRoutes);
+app.use('/api/usuarios', usuariosRoutes);
 
 app.listen(PORT)
 //console.log('Server is running on port 9000');
