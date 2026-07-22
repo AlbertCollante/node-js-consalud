@@ -13,13 +13,14 @@ app.use(express.json());
 
 // API de bienvenida: Verifica que el servidor está activo
 app.get('/', (req, res) => {
-    res.send('Welcome to server');
     console.log({
     DB_HOST,
     DB_USER,
     DB_NAME,
     DB_PORT
     });
+    res.send('Welcome to server');
+    
 });
 
 // API de prueba de conexión: Verifica que la base de datos está conectada
