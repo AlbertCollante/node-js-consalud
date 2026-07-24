@@ -1538,6 +1538,35 @@ app.post('/registrar-detalle-servicio', async (req, res) => {
 
         for (const item of detalle) {
 
+            if (
+                !item.idproducto ||
+                !item.nombre ||
+                item.precio === undefined ||
+                item.precio === null ||
+                item.cantidad === undefined ||
+                item.cantidad === null ||
+                item.cantidad <= 0
+            ) {
+                throw new Error('Datos inválidos en el detalle del servicio');
+            }
+
+            // Verificar que el producto exista en el inventario y tenga stock suficiente
+            const [productos] = await connection.query(`
+                SELECT stock_actual
+                FROM inventario_productos
+                WHERE id = ?
+            `, [item.idproducto]);
+
+            if (productos.length === 0) {
+                throw new Error(`El producto ${item.nombre} (ID: ${item.idproducto}) no existe en el inventario`);
+            }
+
+            const stockActual = productos[0].stock_actual;
+
+            if (stockActual < item.cantidad) {
+                throw new Error(`Stock insuficiente para el producto ${item.nombre}. Disponible: ${stockActual}, requerido: ${item.cantidad}`);
+            }
+
             await connection.query(`
                 INSERT INTO detalleservicio (
                     idserviciodado,
@@ -1555,21 +1584,40 @@ app.post('/registrar-detalle-servicio', async (req, res) => {
                 item.cantidad
             ]);
 
+            // Descontar del inventario
+            await connection.query(`
+                UPDATE inventario_productos
+                SET stock_actual = stock_actual - ?
+                WHERE id = ?
+            `, [item.cantidad, item.idproducto]);
+
         }
 
         await connection.commit();
 
         res.status(201).json({
-            mensaje: 'Detalle registrado correctamente'
+            mensaje: 'Detalle registrado correctamente y stock actualizado'
         });
 
     } catch (error) {
 
         await connection.rollback();
 
+        const mensajeError = error.message;
+
+        if (
+            mensajeError.includes('Datos inválidos en el detalle') ||
+            mensajeError.includes('no existe en el inventario') ||
+            mensajeError.includes('Stock insuficiente')
+        ) {
+            return res.status(400).json({
+                error: mensajeError
+            });
+        }
+
         res.status(500).json({
             error: 'Error al registrar detalle',
-            details: error.message
+            details: mensajeError
         });
 
     } finally {
