@@ -1313,7 +1313,7 @@ app.post('/agregar-servicio', async (req, res) => {
         `, [
             descripcion,
             precio_de_aplicacion || 0,
-            duracion || "",
+            duracion || 0,
             productos ? JSON.stringify(productos) : null,
             total || 0
         ]);
