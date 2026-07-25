@@ -6,6 +6,7 @@ import { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } from './config.js';
 import proveedoresRoutes from './routes/proveedores.routes.js';
 import pedidosRoutes from './routes/pedidos.routes.js';
 import usuariosRoutes from './routes/usuarios.routes.js';
+import { getMySQLDateTime, getMySQLDate } from './utils/helpers.js';
 
 const app = express();
 
@@ -100,17 +101,19 @@ app.post('/apertura-turno', async (req, res) => {
         return res.status(400).json({ error: 'montoInicial, montoInicialYape, cuenta_efectivo y cuenta_yape deben ser numéricos' });
     }
 
+    const fechaHora = getMySQLDateTime();
+
     try {
         const [result] = await pool.query(
             `INSERT INTO aperturas_turno
              (fecha, usuario, montoInicial, monto_inicial_yape, cuenta_efectivo, cuenta_yape, observaciones, estado)
-             VALUES (NOW(), ?, ?, ?, ?, ?, ?, ?)`,
-            [usuario, montoInicialNum, montoInicialYapeNum, cuentaEfectivoNum, cuentaYapeNum, observaciones, 'abierto']
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [fechaHora, usuario, montoInicialNum, montoInicialYapeNum, cuentaEfectivoNum, cuentaYapeNum, observaciones, 'abierto']
         );
 
         res.status(201).json({
             id: result.insertId,
-            fecha: new Date(),
+            fecha: fechaHora,
             usuario,
             montoInicial: montoInicialNum,
             monto_inicial_yape: montoInicialYapeNum,
@@ -203,14 +206,15 @@ app.post('/cierre-turno', async (req, res) => {
         );
 
         const montoInicial = aperturaRows.length > 0 ? Number(aperturaRows[0].montoInicial ?? 0) : 0;
+        const fechaHora = getMySQLDateTime();
 
         const [result] = await connection.query(
             `INSERT INTO cierre_turno
             (fecha_hora, usuario, monto_inicial, efectivo, yape, tarjeta,transferencia, total,observaciones,id_apertura)
             VALUES
-            (NOW(),?, ?, ?, ?, ?, ?, ?, ?,?)`,
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                usuario,montoInicial,efectivo,yape,tarjeta,transferencia,total,observaciones,aperturaId
+                fechaHora, usuario,montoInicial,efectivo,yape,tarjeta,transferencia,total,observaciones,aperturaId
             ]
         );
 
@@ -221,7 +225,7 @@ app.post('/cierre-turno', async (req, res) => {
 
         res.status(201).json({
             id: result.insertId,
-            fecha_hora: new Date(),
+            fecha_hora: fechaHora,
             usuario,
             monto_inicial: montoInicial,
             efectivo,
@@ -428,10 +432,11 @@ app.post('/movimientos-cuenta', async (req, res) => {
             return res.status(404).json({ error: 'Apertura no encontrada' });
         }
 
+        const fechaHora = getMySQLDateTime();
         const [result] = await connection.query(
             `INSERT INTO movimientos_cuenta
              (id_apertura, cuenta_origen, cuenta_destino, monto, comision, cuenta_comision, usuario, observaciones, fecha_hora)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 id_apertura,
                 cuenta_origen,
@@ -440,7 +445,8 @@ app.post('/movimientos-cuenta', async (req, res) => {
                 comisionNum,
                 cuenta_comision ? cuenta_comision.toUpperCase() : null,
                 usuario,
-                observaciones || null
+                observaciones || null,
+                fechaHora
             ]
         );
 
@@ -456,7 +462,8 @@ app.post('/movimientos-cuenta', async (req, res) => {
             comision: comisionNum,
             cuenta_comision: cuenta_comision ? cuenta_comision.toUpperCase() : null,
             usuario,
-            observaciones: observaciones || null
+            observaciones: observaciones || null,
+            fecha_hora: fechaHora
         });
     } catch (error) {
         await connection.rollback();
@@ -809,10 +816,11 @@ app.post('/anular-venta', async (req, res) => {
         );
 
         // 5. Registrar la anulacion
+        const fechaAnulacion = getMySQLDateTime();
         const [anulacionResult] = await connection.query(
             `INSERT INTO ventas_anuladas (idventa, motivo, usuario, fecha_hora, total, metodo)
-             VALUES (?, ?, ?, NOW(), ?, ?)`,
-            [idventa, motivo || null, usuario, venta.total, venta.metodo]
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [idventa, motivo || null, usuario, fechaAnulacion, venta.total, venta.metodo]
         );
 
         await connection.commit();
@@ -821,6 +829,7 @@ app.post('/anular-venta', async (req, res) => {
             mensaje: 'Venta anulada correctamente',
             id_anulacion: anulacionResult.insertId,
             idventa: Number(idventa),
+            fecha_hora: fechaAnulacion,
             totalExtornado: venta.total,
             metodo: venta.metodo,
             motivo: motivo || null,
@@ -1113,6 +1122,9 @@ app.post('/registrar-venta', async (req, res) => {
         });
     }
 
+    const fechaHora = getMySQLDateTime();
+    const fechaDate = getMySQLDate();
+
     try {
 
         const [result] = await pool.query(`
@@ -1132,8 +1144,8 @@ app.post('/registrar-venta', async (req, res) => {
                 estado
             )
             VALUES (
-                NOW(),
-                CURDATE(),
+                ?,
+                ?,
                 ?,
                 ?,
                 ?,
@@ -1147,6 +1159,8 @@ app.post('/registrar-venta', async (req, res) => {
                 'activa'
             )
         `, [
+            fechaHora,
+            fechaDate,
             cliente,
             dni,
             subtotal,
@@ -1161,7 +1175,9 @@ app.post('/registrar-venta', async (req, res) => {
         res.status(201).json({
             mensaje: 'Venta registrada correctamente',
             idventa: result.insertId,
-            id_apertura: id_apertura
+            id_apertura: id_apertura,
+            fecha: fechaHora,
+            dateOnly: fechaDate
         });
 
     } catch (error) {
@@ -1457,6 +1473,8 @@ app.post('/registrar-servicio', async (req, res) => {
         });
     }
 
+    const fechaHora = getMySQLDateTime();
+
     try {
 
         const [result] = await pool.query(`
@@ -1475,7 +1493,7 @@ app.post('/registrar-servicio', async (req, res) => {
                 ?,
                 ?,
                 ?,
-                NOW(),
+                ?,
                 ?,
                 ?,
                 ?,
@@ -1486,6 +1504,7 @@ app.post('/registrar-servicio', async (req, res) => {
             idservicio,
             subtotal,
             vendedor,
+            fechaHora,
             pago,
             vuelto,
             metodo,
@@ -1495,7 +1514,8 @@ app.post('/registrar-servicio', async (req, res) => {
 
         res.status(201).json({
             mensaje: 'Servicio registrado correctamente',
-            idserviciodado: result.insertId
+            idserviciodado: result.insertId,
+            hora: fechaHora
         });
 
     } catch (error) {
@@ -1758,11 +1778,12 @@ async function actualizarSaldoCuenta(connection, idCuenta, monto, tipo) {
 }
 
 async function insertarMovimientoContable(connection, { id_cuenta, id_apertura, monto, tipo, concepto, usuario, origen }) {
+    const fechaHora = getMySQLDateTime();
     await connection.query(
         `INSERT INTO movimientos_contables
          (id_cuenta, id_apertura, monto, tipo, concepto, usuario, origen, fecha_hora)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
-        [id_cuenta, id_apertura || null, monto, tipo, concepto, usuario, origen]
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id_cuenta, id_apertura || null, monto, tipo, concepto, usuario, origen, fechaHora]
     );
 
     await actualizarSaldoCuenta(connection, id_cuenta, monto, tipo);

@@ -3,6 +3,45 @@
 // ======================================================
 
 /**
+ * Devuelve la fecha/hora actual en formato MySQL ("YYYY-MM-DD HH:mm:ss")
+ * forzando la zona horaria de Perú (America/Lima).
+ */
+export function getMySQLDateTime() {
+    const d = new Date();
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Lima',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }).formatToParts(d);
+
+    const get = (type) => parts.find(p => p.type === type).value;
+
+    return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+}
+
+/**
+ * Devuelve la fecha actual en formato MySQL ("YYYY-MM-DD")
+ * forzando la zona horaria de Perú (America/Lima).
+ */
+export function getMySQLDate() {
+    const d = new Date();
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Lima',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(d);
+
+    const get = (type) => parts.find(p => p.type === type).value;
+    return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+/**
  * Convierte un string de fecha/hora de MySQL ("YYYY-MM-DD HH:mm:ss")
  * al formato ISO 8601 ("YYYY-MM-DDTHH:mm:ss") que espera el frontend.
  * Si el valor es null/undefined, lo devuelve tal cual.

@@ -1,5 +1,5 @@
 import { pool } from '../db.js';
-import { formatProveedor, errorResponse } from '../utils/helpers.js';
+import { formatProveedor, errorResponse, getMySQLDateTime } from '../utils/helpers.js';
 
 // POST /api/proveedores
 export async function crearProveedor(req, res) {
@@ -10,10 +10,11 @@ export async function crearProveedor(req, res) {
     }
 
     try {
+        const fechaCreacion = getMySQLDateTime();
         const [result] = await pool.query(
             `INSERT INTO proveedores (nombre, ruc, rubro, telefono, fecha_creacion)
-             VALUES (?, ?, ?, ?, NOW())`,
-            [nombre, ruc || null, rubro || null, telefono || null]
+             VALUES (?, ?, ?, ?, ?)`,
+            [nombre, ruc || null, rubro || null, telefono || null, fechaCreacion]
         );
 
         const [rows] = await pool.query(

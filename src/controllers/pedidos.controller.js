@@ -7,7 +7,8 @@ import {
     calcularEstadoGeneral,
     calcularDiscrepancia,
     toISOStringLocal,
-    errorResponse
+    errorResponse,
+    getMySQLDateTime
 } from '../utils/helpers.js';
 
 function validarDetalle(detalle) {
@@ -149,11 +150,12 @@ export async function crearPedido(req, res) {
             return errorResponse(res, 400, 'El monto pagado no puede ser mayor al total del pedido');
         }
 
+        const fechaCreacion = getMySQLDateTime();
         const [result] = await connection.query(
             `INSERT INTO pedidos
              (id_proveedor, fecha_pedido, fecha_entrega_estimada, total_pedido, estado_pago, monto_pagado, observaciones, fecha_creacion)
-             VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
-            [id_proveedor, fecha_pedido, fecha_entrega_estimada, total_pedido, estadoPagoFinal, montoPagadoFinal, observaciones || null]
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [id_proveedor, fecha_pedido, fecha_entrega_estimada, total_pedido, estadoPagoFinal, montoPagadoFinal, observaciones || null, fechaCreacion]
         );
 
         const idPedido = result.insertId;
@@ -416,12 +418,13 @@ export async function recepcionarDetalle(req, res) {
         const cantidadRecibidaFinal = estadoFinal === 'RECHAZADO' ? 0 : Number(cantidad_recibida);
         const cantidadBonificadaFinal = estadoFinal === 'RECHAZADO' ? 0 : Number(cantidad_bonificada_recibida);
 
+        const fechaRecepcion = getMySQLDateTime();
         await connection.query(
             `UPDATE pedido_detalle
              SET cantidad_recibida = ?, cantidad_bonificada_recibida = ?,
-                 observaciones = ?, estado = ?, fecha_recepcion = NOW()
+                 observaciones = ?, estado = ?, fecha_recepcion = ?
              WHERE id_pedido_detalle = ?`,
-            [cantidadRecibidaFinal, cantidadBonificadaFinal, observaciones || null, estadoFinal, idDetalle]
+            [cantidadRecibidaFinal, cantidadBonificadaFinal, observaciones || null, estadoFinal, fechaRecepcion, idDetalle]
         );
 
         const [updatedRows] = await connection.query(
@@ -475,15 +478,16 @@ export async function rechazarDetalle(req, res) {
             return errorResponse(res, 409, 'La línea ya fue rechazada');
         }
 
+        const fechaRecepcion = getMySQLDateTime();
         await connection.query(
             `UPDATE pedido_detalle
              SET estado = 'RECHAZADO',
                  cantidad_recibida = 0,
                  cantidad_bonificada_recibida = 0,
-                 fecha_recepcion = NOW(),
+                 fecha_recepcion = ?,
                  observaciones = ?
              WHERE id_pedido_detalle = ?`,
-            [observaciones || null, idDetalle]
+            [fechaRecepcion, observaciones || null, idDetalle]
         );
 
         const [updatedRows] = await connection.query(
@@ -590,6 +594,7 @@ export async function rechazarPedido(req, res) {
         }
 
         const observacionFinal = observaciones || null;
+        const fechaRecepcion = getMySQLDateTime();
 
         for (const detalle of detallesRows) {
             if (detalle.estado === 'PENDIENTE') {
@@ -598,10 +603,10 @@ export async function rechazarPedido(req, res) {
                      SET estado = 'RECHAZADO',
                          cantidad_recibida = 0,
                          cantidad_bonificada_recibida = 0,
-                         fecha_recepcion = NOW(),
+                         fecha_recepcion = ?,
                          observaciones = ?
                      WHERE id_pedido_detalle = ?`,
-                    [observacionFinal, detalle.id_pedido_detalle]
+                    [fechaRecepcion, observacionFinal, detalle.id_pedido_detalle]
                 );
             }
         }
